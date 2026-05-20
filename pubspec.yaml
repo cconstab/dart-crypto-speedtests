@@ -1,0 +1,32 @@
+name: boring
+description: A sample command-line application.
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+
+environment:
+  sdk: ^3.5.0
+
+# Add regular dependencies here.
+dependencies:
+  ffi: ^2.1.0
+  webcrypto: ^0.5.7
+  hex: ^0.2.0
+  crypto: ^3.0.5
+  encrypt: ^5.0.3
+  chalk: ^1.2.1
+  cryptography: ^2.7.0
+  better_cryptography: ^1.0.0+1
+  pointycastle: ^3.9.1
+  fastcrypt: ^1.0.0
+  collection: ^1.18.0
+  sodium: ^2.3.1
+  openssl: ^1.0.1
+  # path: ^1.8.0
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.24.0
+
+dependency_overrides:
+  openssl:
+    path: packages/openssl
