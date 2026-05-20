@@ -162,7 +162,7 @@ void _warmup(int n, void Function() fn) {
 }
 
 int _mbps(int dataBytes, int repeat, int ms) =>
-    (((dataBytes * 8 * repeat) / 1000000) / (ms / 1000)).round();
+    ms == 0 ? 0 : (((dataBytes * 8 * repeat) / 1000000) / (ms / 1000)).round();
 
 // ---------------------------------------------------------------------------
 // Hash tests
@@ -211,7 +211,7 @@ Future<List<TestResult>> hashTest(
   var betterMs = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, betterMs);
   print("\n$betterMs ms  ${chalk.green('$mbps')} mbps");
-  var pct = ((softwareMs / betterMs) * 100).round() - 100;
+  var pct = betterMs == 0 ? 0 : ((softwareMs / betterMs) * 100).round() - 100;
   print("Better vs Crypto: ${chalk.green("$pct")}%");
   results.add(TestResult('Better SHA256', mbps, betterMs));
 
@@ -231,7 +231,7 @@ Future<List<TestResult>> hashTest(
   var boringSslMs = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, boringSslMs);
   print("\n$boringSslMs ms  ${chalk.green('$mbps')} mbps");
-  pct = ((softwareMs / boringSslMs) * 100).round() - 100;
+  pct = boringSslMs == 0 ? 0 : ((softwareMs / boringSslMs) * 100).round() - 100;
   print("BoringSSL vs Crypto: ${chalk.green("$pct")}%");
   results.add(TestResult('BoringSSL SHA256', mbps, boringSslMs));
 
@@ -251,7 +251,7 @@ Future<List<TestResult>> hashTest(
     var opensslMs = sw.elapsedMilliseconds;
     mbps = _mbps(inputBytes.length, repeat, opensslMs);
     print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
-    pct = ((softwareMs / opensslMs) * 100).round() - 100;
+    pct = opensslMs == 0 ? 0 : ((softwareMs / opensslMs) * 100).round() - 100;
     print("OpenSSL vs Crypto: ${chalk.green("$pct")}%");
     results.add(TestResult('OpenSSL SHA256', mbps, opensslMs));
   }
@@ -324,7 +324,7 @@ Future<List<TestResult>> aesctrTest(
   var betterMs = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, betterMs);
   print("\n$betterMs ms  ${chalk.green('$mbps')} mbps");
-  var pct = ((softwareMs / betterMs) * 100).round() - 100;
+  var pct = betterMs == 0 ? 0 : ((softwareMs / betterMs) * 100).round() - 100;
   print("Better vs Software: ${chalk.green("$pct")}%");
   results.add(TestResult('Better AES-CTR', mbps, betterMs));
 
@@ -352,7 +352,7 @@ Future<List<TestResult>> aesctrTest(
   var boringSslMs = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, boringSslMs);
   print("\n$boringSslMs ms  ${chalk.green('$mbps')} mbps");
-  pct = ((softwareMs / boringSslMs) * 100).round() - 100;
+  pct = boringSslMs == 0 ? 0 : ((softwareMs / boringSslMs) * 100).round() - 100;
   print("BoringSSL vs Software: ${chalk.green("$pct")}%");
   results.add(TestResult('BoringSSL AES-CTR', mbps, boringSslMs));
 
@@ -381,7 +381,7 @@ Future<List<TestResult>> aesctrTest(
     var opensslMs = sw.elapsedMilliseconds;
     mbps = _mbps(inputBytes.length, repeat, opensslMs);
     print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
-    pct = ((softwareMs / opensslMs) * 100).round() - 100;
+    pct = opensslMs == 0 ? 0 : ((softwareMs / opensslMs) * 100).round() - 100;
     print("OpenSSL vs Software: ${chalk.green("$pct")}%");
     results.add(TestResult('OpenSSL AES-256-CTR', mbps, opensslMs));
   }
@@ -462,7 +462,7 @@ Future<List<TestResult>> chacha20Test(
   var betterMs = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, betterMs);
   print("\n$betterMs ms  ${chalk.green('$mbps')} mbps");
-  var pct = ((pcMs / betterMs) * 100).round() - 100;
+  var pct = betterMs == 0 ? 0 : ((pcMs / betterMs) * 100).round() - 100;
   print(pct > 0
       ? "Better faster than PC: ${chalk.green("$pct")}%"
       : "PointyCastle faster than Better: ${chalk.green("${-pct}")}%");
@@ -493,7 +493,7 @@ Future<List<TestResult>> chacha20Test(
     var opensslMs = sw.elapsedMilliseconds;
     mbps = _mbps(inputBytes.length, repeat, opensslMs);
     print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
-    pct = ((pcMs / opensslMs) * 100).round() - 100;
+    pct = opensslMs == 0 ? 0 : ((pcMs / opensslMs) * 100).round() - 100;
     print(pct > 0
         ? "OpenSSL faster than PC: ${chalk.green("$pct")}%"
         : "PointyCastle faster than OpenSSL: ${chalk.green("${-pct}")}%");

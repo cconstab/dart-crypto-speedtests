@@ -72,7 +72,7 @@ OpenSSL 3.5.4 from source at build time. This requires:
 The `webcrypto` package requires a one-time setup step that builds BoringSSL:
 
 ```
-dart pub run webcrypto:setup
+dart run webcrypto:setup
 ```
 
 **macOS / Linux:** ensure `clang` and `cmake` are installed.
@@ -86,7 +86,14 @@ choco install llvm
 choco install nasm
 ```
 
-Then run `dart pub run webcrypto:setup`.
+Then run `dart run webcrypto:setup`.
+
+### Dart ≥ 3.12 — `openssl` package patch
+
+The published `openssl` 1.0.1 package has a build hook incompatibility with
+Dart SDK ≥ 3.12 (`resolver.resolve` API change in `native_toolchain_c`).
+A patched local copy is included at `packages/openssl/` and wired in via
+`dependency_overrides` in `pubspec.yaml` — no action needed beyond `dart pub get`.
 
 The `sodium` tests require `libsodium` at runtime:
 
@@ -102,6 +109,7 @@ brew install libsodium
 
 ```bash
 dart pub get
+dart run webcrypto:setup   # one-time BoringSSL build
 
 # Full suite: <size MB> <repeat>
 dart run bin/speedtest.dart 1 10
