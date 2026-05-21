@@ -90,6 +90,10 @@ typedef _DecInitExNative     = Int32 Function(Pointer<EvpCipherCtx>, Pointer<Evp
 typedef _DecUpdateNative     = Int32 Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>, Pointer<Uint8>, Int32);
 typedef _DecFinalExNative    = Int32 Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>);
 
+// Random bytes — RAND_bytes fills a buffer using the OS entropy source
+// (RDRAND / RDSEED on x86, getrandom on Linux). Returns 1 on success.
+typedef _RandBytesNative     = Int32 Function(Pointer<Uint8>, Int32);
+
 // ---------------------------------------------------------------------------
 // OpenSslCrypto
 //
@@ -118,6 +122,7 @@ class OpenSslCrypto {
   late final int Function(Pointer<EvpCipherCtx>, Pointer<EvpCipher>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>) _decInitEx;
   late final int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>, Pointer<Uint8>, int) _decUpdate;
   late final int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>)                      _decFinalEx;
+  late final int Function(Pointer<Uint8>, int)                                                         _randBytes;
 
   // Persistent contexts — allocated once, reset on each call via Init_ex.
   late final Pointer<EvpMdCtx>    _mdCtx;
@@ -167,6 +172,7 @@ class OpenSslCrypto {
     _decInitEx    = _lib.lookupFunction<_DecInitExNative,     int Function(Pointer<EvpCipherCtx>, Pointer<EvpCipher>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>('EVP_DecryptInit_ex');
     _decUpdate    = _lib.lookupFunction<_DecUpdateNative,     int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>, Pointer<Uint8>, int)>('EVP_DecryptUpdate');
     _decFinalEx   = _lib.lookupFunction<_DecFinalExNative,    int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>)>('EVP_DecryptFinal_ex');
+    _randBytes    = _lib.lookupFunction<_RandBytesNative,     int Function(Pointer<Uint8>, int)>('RAND_bytes');
 
     _mdCtx      = _mdCtxNew();
     _cipherCtx  = _cipherCtxNew();
@@ -204,6 +210,15 @@ class OpenSslCrypto {
   /// ChaCha20 decrypt. Same key/iv layout as [chacha20Encrypt].
   Uint8List chacha20Decrypt(Uint8List ciphertext, Uint8List key, Uint8List iv) =>
       _cipher(_chacha20, ciphertext, key, iv, encrypt: false);
+
+  /// Fill [n] bytes from OpenSSL's CSPRNG (RDRAND/RDSEED on x86, getrandom on Linux).
+  /// Throws [StateError] if RAND_bytes reports failure.
+  Uint8List randBytes(int n) {
+    _ensureBufs(n);
+    final rc = _randBytes(_outBuf, n);
+    if (rc != 1) throw StateError('RAND_bytes failed (rc=$rc)');
+    return Uint8List.fromList(_outBuf.asTypedList(n));
+  }
 
   Uint8List _cipher(
     Pointer<EvpCipher> Function() cipherFn,

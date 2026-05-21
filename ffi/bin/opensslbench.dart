@@ -43,6 +43,7 @@ typedef _CipherN         = Pointer<EvpCipher>     Function();
 typedef _EncInitExN      = Int32 Function(Pointer<EvpCipherCtx>, Pointer<EvpCipher>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>);
 typedef _EncUpdateN      = Int32 Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>, Pointer<Uint8>, Int32);
 typedef _EncFinalExN     = Int32 Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>);
+typedef _RandBytesN      = Int32 Function(Pointer<Uint8>, Int32);
 
 // ---------------------------------------------------------------------------
 // OpenSslCrypto — persistent EVP contexts, zero-alloc hot path
@@ -65,6 +66,7 @@ class OpenSslCrypto {
   late final int Function(Pointer<EvpCipherCtx>, Pointer<EvpCipher>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>) _decInitEx;
   late final int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>, Pointer<Uint8>, int)       _decUpdate;
   late final int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>)                            _decFinalEx;
+  late final int Function(Pointer<Uint8>, int)                                                               _randBytes;
 
   late final Pointer<EvpMdCtx>     _mdCtx;
   late final Pointer<EvpCipherCtx> _cipherCtx;
@@ -104,6 +106,7 @@ class OpenSslCrypto {
     _decInitEx     = lib.lookupFunction<_EncInitExN,     int Function(Pointer<EvpCipherCtx>, Pointer<EvpCipher>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>('EVP_DecryptInit_ex');
     _decUpdate     = lib.lookupFunction<_EncUpdateN,     int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>, Pointer<Uint8>, int)>('EVP_DecryptUpdate');
     _decFinalEx    = lib.lookupFunction<_EncFinalExN,    int Function(Pointer<EvpCipherCtx>, Pointer<Uint8>, Pointer<Int32>)>('EVP_DecryptFinal_ex');
+    _randBytes     = lib.lookupFunction<_RandBytesN,     int Function(Pointer<Uint8>, int)>('RAND_bytes');
 
     _mdCtx      = _mdCtxNew();
     _cipherCtx  = _cipherCtxNew();
@@ -128,6 +131,13 @@ class OpenSslCrypto {
   Uint8List aes256CtrDecrypt(Uint8List c, Uint8List key, Uint8List iv) => _cipher(_aes256Ctr,  c,   key, iv, enc: false);
   Uint8List chacha20Encrypt (Uint8List p, Uint8List key, Uint8List iv) => _cipher(_chacha20fn, p,   key, iv, enc: true);
   Uint8List chacha20Decrypt (Uint8List c, Uint8List key, Uint8List iv) => _cipher(_chacha20fn, c,   key, iv, enc: false);
+
+  Uint8List randBytes(int n) {
+    _ensureBufs(n);
+    final rc = _randBytes(_outBuf, n);
+    if (rc != 1) throw StateError('RAND_bytes failed (rc=$rc)');
+    return Uint8List.fromList(_outBuf.asTypedList(n));
+  }
 
   Uint8List _cipher(Pointer<EvpCipher> Function() fn, Uint8List input, Uint8List key, Uint8List iv, {required bool enc}) {
     _ensureBufs(input.length);
@@ -245,6 +255,10 @@ void main(List<String> args) {
     final enc = ffi.chacha20Encrypt(input, chaKey, chaIv);
     return ffi.chacha20Decrypt(enc, chaKey, chaIv);
   }));
+
+  // RAND_bytes
+  _section('RAND_bytes (HW RNG)  —  ${mBytes ~/ 1024} KB × $repeat');
+  results.add(_bench('RAND_bytes', input, repeat, warmups, () => ffi.randBytes(mBytes)));
 
   ffi.dispose();
   _printSummary(results, mBytes, repeat);

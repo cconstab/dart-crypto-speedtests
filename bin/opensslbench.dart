@@ -58,6 +58,9 @@ void main(List<String> args) {
   _section('ChaCha20  —  ${input.length ~/ 1024} KB × $repeat');
   results.addAll(_benchChacha20(input, repeat, ffi: ffi, pkg: pkg));
 
+  _section('RAND_bytes (HW RNG)  —  ${input.length ~/ 1024} KB × $repeat');
+  results.addAll(_benchRand(input, repeat, ffi: ffi));
+
   ffi?.dispose();
   pkg?.dispose();
 
@@ -147,6 +150,23 @@ List<_Result> _benchChacha20(
     results.add(_timeRoundtrip('Pkg  ChaCha20 opt        ', input, repeat, () {
       final enc = pkg.chacha20Encrypt(input, key, iv);
       return pkg.chacha20Decrypt(enc, key, iv);
+    }));
+  }
+
+  return results;
+}
+
+List<_Result> _benchRand(
+  Uint8List input,
+  int repeat, {
+  OpenSslCrypto? ffi,
+}) {
+  final results = <_Result>[];
+  final n = input.length;
+
+  if (ffi != null) {
+    results.add(_time('FFI  RAND_bytes (hw-accel)', input, repeat, () {
+      ffi.randBytes(n);
     }));
   }
 
