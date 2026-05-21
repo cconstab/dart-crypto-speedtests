@@ -34,6 +34,25 @@ The bundled OpenSSL is compiled with `no-asm`, so it always runs in software.
 Comparing FFI vs Pkg directly shows how much hardware acceleration is worth on
 your specific CPU.
 
+### `ffi/` — pure FFI benchmark (no Native Assets)
+
+A self-contained benchmark in its own Dart package with minimal dependencies
+(`ffi`, `chalk`, `collection`). Tests SHA-256, AES-256-CTR, ChaCha20, and
+RAND_bytes against the system `libcrypto` only — no build toolchain required.
+
+Because it uses only `dart:ffi` + `DynamicLibrary.open()`, it compiles to a
+single self-contained executable with `dart compile exe`:
+
+```bash
+cd ffi
+dart pub get
+dart compile exe bin/opensslbench.dart -o opensslbench
+./opensslbench <size_mb> <repeat>
+```
+
+This is the easiest option for dropping onto a target machine to measure raw
+OpenSSL FFI throughput — just copy the binary, no bundled libraries needed.
+
 ## Results (example — Intel x86_64 with AES-NI + SHA-NI)
 
 ```
