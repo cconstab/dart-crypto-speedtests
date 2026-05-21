@@ -68,6 +68,12 @@ OpenSSL 3.5.4 from source at build time. This requires:
 - `make` (macOS/Linux)
 - `cmake`, `clang`, `llvm`, `nasm` (Windows — see below)
 
+**Ubuntu/Debian:** install the full build toolchain in one step:
+
+```bash
+sudo apt install build-essential perl
+```
+
 ### Dart ≥ 3.12 — `openssl` package patch
 
 The published `openssl` 1.0.1 package has a build hook incompatibility with
