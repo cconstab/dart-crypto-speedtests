@@ -238,8 +238,37 @@ Future<void> downloadAndExtract(
   Uri workDir, {
   bool createFolderForExtraction = true,
 }) async {
-  // download the file
-  await runProcess('curl', ['-L', url, '-o', outputFileName], workingDirectory: workDir);
+  // Ensure the working directory exists before writing into it.
+  await Directory(workDir.toFilePath(windows: Platform.isWindows)).create(recursive: true);
+
+  // Download using dart:io HttpClient — no curl dependency.
+  final outputFile = File(workDir.resolve(outputFileName).toFilePath(windows: Platform.isWindows));
+  final client = HttpClient()..autoUncompress = false;
+  try {
+    Uri target = Uri.parse(url);
+    HttpClientResponse response;
+    // Follow up to 10 redirects manually so we can handle GitHub release redirects.
+    for (var i = 0; i < 10; i++) {
+      final req = await client.getUrl(target);
+      req.followRedirects = false;
+      response = await req.close();
+      if (response.isRedirect) {
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        await response.drain<void>();
+        if (location == null) throw Exception('Redirect with no Location header from $target');
+        target = target.resolveUri(Uri.parse(location));
+        continue;
+      }
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode} downloading $url');
+      }
+      final sink = outputFile.openWrite();
+      await response.pipe(sink);
+      break;
+    }
+  } finally {
+    client.close();
+  }
 
   // unzip the file
   final isTarGz = outputFileName.endsWith('.tar.gz');
