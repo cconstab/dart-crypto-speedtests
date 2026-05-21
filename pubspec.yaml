@@ -20,7 +20,8 @@ dependencies:
   collection: ^1.18.0
   sodium: ^2.3.1
   openssl: ^1.0.1
-  # path: ^1.8.0
+  boringssl:
+    path: packages/boringssl
 
 dev_dependencies:
   lints: ^4.0.0

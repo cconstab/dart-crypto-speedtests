@@ -210,23 +210,39 @@ class BoringSslCrypto {
 // Path resolution for libboringssl_dart
 // ---------------------------------------------------------------------------
 
-/// Returns the path to the pre-built libboringssl_dart shared library.
+/// Returns the path to the libboringssl_dart shared library.
 ///
-/// Build it first with:  scripts/build_boringssl.sh
+/// Search order:
+/// 1. Native Assets output (.dart_tool/hooks_runner/shared/boringssl/) — set up
+///    automatically by [dart run] / [dart build] via the packages/boringssl hook.
+/// 2. build/ — output of scripts/build_boringssl.sh (manual fallback).
+/// 3. Next to the current executable (compiled dart build output).
 String getBoringSslLibPath() {
-  final base = Directory.current.path;
+  final libName = Platform.isWindows ? 'boringssl_dart.dll'
+                : Platform.isMacOS  ? 'libboringssl_dart.dylib'
+                : 'libboringssl_dart.so';
+
+  final base    = Directory.current.path;
+  final execDir = File(Platform.resolvedExecutable).parent.path;
+
   final candidates = [
-    '$base/build/libboringssl_dart.so',
-    '$base/build/libboringssl_dart.dylib',
-    '$base/build/libboringssl_dart.dll',
+    // Native Assets output: .dart_tool/hooks_runner/shared/boringssl/build/
+    '$base/.dart_tool/hooks_runner/shared/boringssl/build/$libName',
+    // Manual build script output
+    '$base/build/$libName',
+    // Compiled bundle (dart build cli output)
+    '$execDir/$libName',
+    '$execDir/../lib/$libName',
   ];
+
   for (final p in candidates) {
     if (File(p).existsSync()) return p;
   }
   throw StateError(
-    'libboringssl_dart not found at build/libboringssl_dart.so\n'
-    'Build it first:\n'
-    '  scripts/build_boringssl.sh\n'
-    '(Requires webcrypto in pub cache: dart pub cache add webcrypto:0.5.8)',
+    '$libName not found.\n'
+    'It is built automatically by the Native Assets hook when you run:\n'
+    '  dart pub get && dart run bin/speedtest.dart ...\n'
+    'Requires webcrypto in pub cache: dart pub cache add webcrypto:0.5.8\n'
+    'Or build manually: bash scripts/build_boringssl.sh',
   );
 }
