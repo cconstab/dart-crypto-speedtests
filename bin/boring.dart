@@ -1,4 +1,4 @@
-import 'package:boring/boring.dart' as boring;
+import 'package:dart_crypto_speedtests/dart_crypto_speedtests.dart' as openssl_ffi;
 import 'dart:typed_data';
 import 'dart:convert' show utf8;
 
@@ -35,7 +35,7 @@ Future<void> main() async {
 
   // Demonstrate OpenSSL FFI if available
   try {
-    final openssl = boring.OpenSslCrypto(boring.getOpenSslLibPath());
+    final openssl = openssl_ffi.OpenSslCrypto(openssl_ffi.getOpenSslLibPath());
     final hash = openssl.sha256(Uint8List.fromList(utf8.encode(plainText)));
     print('OpenSSL SHA256: ${HEX.encode(hash)}');
     openssl.dispose();

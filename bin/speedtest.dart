@@ -1,4 +1,4 @@
-import 'package:boring/boring.dart'; // OpenSslCrypto, getOpenSslLibPath
+import 'package:dart_crypto_speedtests/dart_crypto_speedtests.dart'; // OpenSslCrypto (system libcrypto FFI), OpenSslPkgCrypto
 import 'dart:typed_data';
 import 'dart:convert' show utf8;
 import 'dart:ffi' show DynamicLibrary; // needed by sodiumTest
@@ -82,14 +82,24 @@ Future<void> main(List<String> arguments) async {
     print(chalk.yellow('OpenSSL pkg not available: $e'));
   }
 
+  BoringSslCrypto? boring;
+  try {
+    boring = BoringSslCrypto(getBoringSslLibPath());
+    print('BoringSSL loaded from: ${getBoringSslLibPath()}');
+    boring.prewarm(inputBytes.length);
+  } catch (e) {
+    print(chalk.yellow('BoringSSL not available: $e'));
+    print(chalk.yellow('Build it with: scripts/build_boringssl.sh'));
+  }
+
   line();
-  allResults.addAll(await hashTest(text, inputBytes, repeat, openssl: openssl));
+  allResults.addAll(await hashTest(text, inputBytes, repeat, openssl: openssl, boring: boring));
   line();
-  allResults.addAll(await aesctrTest(text, inputBytes, repeat, openssl: openssl));
+  allResults.addAll(await aesctrTest(text, inputBytes, repeat, openssl: openssl, boring: boring));
   line();
   allResults.addAll(fastcryptTest(text, repeat));
   line();
-  allResults.addAll(await chacha20Test(text, inputBytes, repeat, openssl: openssl));
+  allResults.addAll(await chacha20Test(text, inputBytes, repeat, openssl: openssl, boring: boring));
   line();
   allResults.addAll(await sodiumTest(text, inputBytes, repeat));
   line();
@@ -99,8 +109,12 @@ Future<void> main(List<String> arguments) async {
     line();
   }
 
+  allResults.addAll(randBytesTest(inputBytes, repeat, openssl: openssl, boring: boring));
+  line();
+
   openssl?.dispose();
   opensslPkg?.dispose();
+  boring?.dispose();
 
   // Summary
   print('');
@@ -113,33 +127,26 @@ Future<void> main(List<String> arguments) async {
   print('');
 
   final hashResults = allResults.where((r) => r.name.contains('SHA256')).toList();
-  final encResults  = allResults.where((r) => !r.name.contains('SHA256')).toList();
+  final rngResults  = allResults.where((r) => r.name.contains('RAND')).toList();
+  final encResults  = allResults.where((r) => !r.name.contains('SHA256') && !r.name.contains('RAND')).toList();
 
-  if (hashResults.isNotEmpty) {
-    print('${chalk.yellow('HASH ALGORITHM PERFORMANCE:')}');
+  void printTable(String title, List<TestResult> rows) {
+    if (rows.isEmpty) return;
+    print('${chalk.yellow(title)}');
     print('');
     print('┌───────────────────────────────────┬─────────────┬───────────────┐');
     print('│ Algorithm                         │   Time (ms) │  Speed (mbps) │');
     print('├───────────────────────────────────┼─────────────┼───────────────┤');
-    for (var r in hashResults) {
+    for (var r in rows) {
       print('│ ${r.name.padRight(33)} │   ${r.timeMs.toString().padLeft(9)} │   ${r.mbps.toString().padLeft(11)} │');
     }
     print('└───────────────────────────────────┴─────────────┴───────────────┘');
     print('');
   }
 
-  if (encResults.isNotEmpty) {
-    print('${chalk.yellow('ENCRYPTION ALGORITHM PERFORMANCE:')}');
-    print('');
-    print('┌───────────────────────────────────┬─────────────┬───────────────┐');
-    print('│ Algorithm                         │   Time (ms) │  Speed (mbps) │');
-    print('├───────────────────────────────────┼─────────────┼───────────────┤');
-    for (var r in encResults) {
-      print('│ ${r.name.padRight(33)} │   ${r.timeMs.toString().padLeft(9)} │   ${r.mbps.toString().padLeft(11)} │');
-    }
-    print('└───────────────────────────────────┴─────────────┴───────────────┘');
-    print('');
-  }
+  printTable('HASH ALGORITHM PERFORMANCE:', hashResults);
+  printTable('ENCRYPTION ALGORITHM PERFORMANCE:', encResults);
+  printTable('RNG PERFORMANCE:', rngResults);
 
   if (hashResults.isNotEmpty) {
     final best = hashResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
@@ -148,6 +155,10 @@ Future<void> main(List<String> arguments) async {
   if (encResults.isNotEmpty) {
     final best = encResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
     print('${chalk.green('🏆 Best Encryption Performance:')} ${best.name} (${best.mbps} mbps)');
+  }
+  if (rngResults.isNotEmpty) {
+    final best = rngResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
+    print('${chalk.green('🏆 Best RNG Performance:')} ${best.name} (${best.mbps} mbps)');
   }
   print('${chalk.blue('=' * 70)}');
 }
@@ -176,6 +187,7 @@ Future<List<TestResult>> hashTest(
   Uint8List inputBytes,
   int repeat, {
   OpenSslCrypto? openssl,
+  BoringSslCrypto? boring,
 }) async {
   List<TestResult> results = [];
   final warmups = min(2, repeat);
@@ -236,7 +248,28 @@ Future<List<TestResult>> hashTest(
     print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
     pct = opensslMs == 0 ? 0 : ((softwareMs / opensslMs) * 100).round() - 100;
     print("OpenSSL vs Crypto: ${chalk.green("$pct")}%");
-    results.add(TestResult('OpenSSL SHA256', mbps, opensslMs));
+    results.add(TestResult('FFI libcrypto SHA256', mbps, opensslMs));
+  }
+
+  // --- BoringSSL SHA-256 ---
+  if (boring != null) {
+    line();
+    print("Start BoringSSL SHA256");
+    _warmup(warmups, () => boring.sha256(inputBytes));
+    count = 0;
+    sw..reset()..start();
+    while (count < repeat) {
+      boring.sha256(inputBytes);
+      stdout.write('.');
+      count++;
+    }
+    sw.stop();
+    var boringMs = sw.elapsedMilliseconds;
+    mbps = _mbps(inputBytes.length, repeat, boringMs);
+    print("\n$boringMs ms  ${chalk.green('$mbps')} mbps");
+    pct = boringMs == 0 ? 0 : ((softwareMs / boringMs) * 100).round() - 100;
+    print("BoringSSL vs Crypto: ${chalk.green("$pct")}%");
+    results.add(TestResult('BoringSSL SHA256', mbps, boringMs));
   }
 
   return results;
@@ -251,6 +284,7 @@ Future<List<TestResult>> aesctrTest(
   Uint8List inputBytes,
   int repeat, {
   OpenSslCrypto? openssl,
+  BoringSslCrypto? boring,
 }) async {
   List<TestResult> results = [];
   final warmups = min(2, repeat);
@@ -338,7 +372,37 @@ Future<List<TestResult>> aesctrTest(
     print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
     pct = opensslMs == 0 ? 0 : ((softwareMs / opensslMs) * 100).round() - 100;
     print("OpenSSL vs Software: ${chalk.green("$pct")}%");
-    results.add(TestResult('OpenSSL AES-256-CTR', mbps, opensslMs));
+    results.add(TestResult('FFI libcrypto AES-256-CTR', mbps, opensslMs));
+  }
+
+  // --- BoringSSL AES-256-CTR ---
+  if (boring != null) {
+    line();
+    print("Start BoringSSL AES-256-CTR");
+    final bKey = Uint8List(32);
+    final bIv  = Uint8List(16);
+    _fillRandom(bKey);
+    _fillRandom(bIv);
+    _warmup(warmups, () {
+      final enc = boring.aes256CtrEncrypt(inputBytes, bKey, bIv);
+      boring.aes256CtrDecrypt(enc, bKey, bIv);
+    });
+    count = 0;
+    sw..reset()..start();
+    while (count < repeat) {
+      final enc = boring.aes256CtrEncrypt(inputBytes, bKey, bIv);
+      final dec = boring.aes256CtrDecrypt(enc, bKey, bIv);
+      stdout.write(const ListEquality().equals(dec, inputBytes)
+          ? chalk.green(".") : chalk.red("."));
+      count++;
+    }
+    sw.stop();
+    var boringMs = sw.elapsedMilliseconds;
+    mbps = _mbps(inputBytes.length, repeat, boringMs);
+    print("\n$boringMs ms  ${chalk.green('$mbps')} mbps");
+    pct = boringMs == 0 ? 0 : ((softwareMs / boringMs) * 100).round() - 100;
+    print("BoringSSL vs Software: ${chalk.green("$pct")}%");
+    results.add(TestResult('BoringSSL AES-256-CTR', mbps, boringMs));
   }
 
   return results;
@@ -353,6 +417,7 @@ Future<List<TestResult>> chacha20Test(
   Uint8List inputBytes,
   int repeat, {
   OpenSslCrypto? openssl,
+  BoringSslCrypto? boring,
 }) async {
   List<TestResult> results = [];
   final warmups = min(2, repeat);
@@ -452,7 +517,39 @@ Future<List<TestResult>> chacha20Test(
     print(pct > 0
         ? "OpenSSL faster than PC: ${chalk.green("$pct")}%"
         : "PointyCastle faster than OpenSSL: ${chalk.green("${-pct}")}%");
-    results.add(TestResult('OpenSSL ChaCha20', mbps, opensslMs));
+    results.add(TestResult('FFI libcrypto ChaCha20', mbps, opensslMs));
+  }
+
+  // --- BoringSSL ChaCha20 ---
+  if (boring != null) {
+    line();
+    print("Start BoringSSL ChaCha20");
+    final bKey = Uint8List(32);
+    final bIv  = Uint8List(16);
+    _fillRandom(bKey);
+    _fillRandom(bIv);
+    _warmup(warmups, () {
+      final enc = boring.chacha20Encrypt(inputBytes, bKey, bIv);
+      boring.chacha20Decrypt(enc, bKey, bIv);
+    });
+    count = 0;
+    sw..reset()..start();
+    while (count < repeat) {
+      final enc = boring.chacha20Encrypt(inputBytes, bKey, bIv);
+      final dec = boring.chacha20Decrypt(enc, bKey, bIv);
+      stdout.write(const ListEquality().equals(dec, inputBytes)
+          ? chalk.green(".") : chalk.red("."));
+      count++;
+    }
+    sw.stop();
+    var boringMs = sw.elapsedMilliseconds;
+    mbps = _mbps(inputBytes.length, repeat, boringMs);
+    print("\n$boringMs ms  ${chalk.green('$mbps')} mbps");
+    pct = boringMs == 0 ? 0 : ((pcMs / boringMs) * 100).round() - 100;
+    print(pct > 0
+        ? "BoringSSL faster than PC: ${chalk.green("$pct")}%"
+        : "PointyCastle faster than BoringSSL: ${chalk.green("${-pct}")}%");
+    results.add(TestResult('BoringSSL ChaCha20', mbps, boringMs));
   }
 
   return results;
@@ -783,6 +880,63 @@ List<TestResult> opensslPkgTest(
   mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg ChaCha20 opt', mbps, ms));
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// RAND_bytes test — OpenSSL FFI hardware RNG
+// ---------------------------------------------------------------------------
+
+List<TestResult> randBytesTest(
+  Uint8List inputBytes,
+  int repeat, {
+  OpenSslCrypto? openssl,
+  BoringSslCrypto? boring,
+}) {
+  List<TestResult> results = [];
+  if (openssl == null && boring == null) return results;
+
+  final warmups = min(2, repeat);
+  final n = inputBytes.length;
+  line();
+  print("String length: ${(n / 1024).toStringAsFixed(0)} KB");
+
+  if (openssl != null) {
+    line();
+    print("Start OpenSSL RAND_bytes");
+    _warmup(warmups, () => openssl.randBytes(n));
+    int count = 0;
+    final sw = Stopwatch()..start();
+    while (count < repeat) {
+      openssl.randBytes(n);
+      stdout.write('.');
+      count++;
+    }
+    sw.stop();
+    final ms   = sw.elapsedMilliseconds;
+    final mbps = _mbps(n, repeat, ms);
+    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    results.add(TestResult('FFI libcrypto RAND_bytes', mbps, ms));
+  }
+
+  if (boring != null) {
+    line();
+    print("Start BoringSSL RAND_bytes");
+    _warmup(warmups, () => boring.randBytes(n));
+    int count = 0;
+    final sw = Stopwatch()..start();
+    while (count < repeat) {
+      boring.randBytes(n);
+      stdout.write('.');
+      count++;
+    }
+    sw.stop();
+    final ms   = sw.elapsedMilliseconds;
+    final mbps = _mbps(n, repeat, ms);
+    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    results.add(TestResult('BoringSSL RAND_bytes', mbps, ms));
+  }
 
   return results;
 }

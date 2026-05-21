@@ -17,6 +17,7 @@ Runs SHA-256, AES-256-CTR, and ChaCha20 across every major Dart crypto library:
 | `package:fastcrypt` | Rust via FFI |
 | `package:sodium` (libsodium) | Native FFI, runtime-loaded |
 | OpenSSL FFI (system libcrypto) | Native FFI, hardware-accelerated |
+| BoringSSL FFI (pre-built) | Native FFI, hardware-accelerated (Google's OpenSSL fork) |
 | `package:openssl` (bundled) | Native Assets, no-asm build |
 
 ### `bin/opensslbench.dart` — standalone OpenSSL benchmark
@@ -122,6 +123,23 @@ dart run bin/speedtest.dart 1 10
 dart run bin/opensslbench.dart 1 10
 ```
 
+### BoringSSL setup (optional)
+
+The `speedtest.dart` benchmark includes BoringSSL if `build/libboringssl_dart.so`
+is present. Build it once:
+
+```bash
+# Requires cmake + C compiler; uses the BoringSSL source bundled in webcrypto pub cache.
+# If webcrypto is not already in pub cache:
+dart pub cache add webcrypto:0.5.8
+
+bash scripts/build_boringssl.sh
+```
+
+BoringSSL uses Google's fork of OpenSSL (used in Chrome / Android).
+It has hardware-accelerated AES-NI and SHA-NI on x86_64, and uses
+`CRYPTO_chacha_20` (its direct ChaCha20 API) since it removed `EVP_chacha20`.
+
 ## Building native binaries
 
 `opensslbench` uses Native Assets so it requires `dart build cli` rather than
@@ -166,6 +184,15 @@ Two patterns using the `openssl` pub package (Native Assets, build-time compiled
 
 At identical settings both hit the same C symbols, so any throughput difference
 reflects Dart-side allocation overhead rather than crypto speed.
+
+### BoringSSL FFI (lib/src/boringssl_ffi.dart)
+
+Google's fork of OpenSSL, used in Chrome and Android. Built once from source
+via `scripts/build_boringssl.sh` (cmake + BoringSSL source from webcrypto pub
+cache). Hardware-accelerated on x86_64 (AES-NI, SHA-NI). Uses
+`CRYPTO_chacha_20` for ChaCha20 because BoringSSL removed `EVP_chacha20` from
+its EVP cipher API. The IV layout `[4-byte counter LE][12-byte nonce]` is kept
+identical to OpenSSL's `EVP_chacha20` so key/IV pairs are interchangeable.
 
 ### Timing accuracy
 

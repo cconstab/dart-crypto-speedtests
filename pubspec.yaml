@@ -1,5 +1,5 @@
-name: boring
-description: A sample command-line application.
+name: dart_crypto_speedtests
+description: Dart crypto library benchmark suite.
 version: 1.0.0
 # repository: https://github.com/my_org/my_repo
 

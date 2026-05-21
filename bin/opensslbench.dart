@@ -12,7 +12,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:boring/boring.dart';
+import 'package:dart_crypto_speedtests/dart_crypto_speedtests.dart';
 import 'package:chalk/chalk.dart';
 import 'package:collection/collection.dart';
 
