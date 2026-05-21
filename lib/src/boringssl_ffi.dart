@@ -242,7 +242,7 @@ String getBoringSslLibPath() {
     '$libName not found.\n'
     'It is built automatically by the Native Assets hook when you run:\n'
     '  dart pub get && dart run bin/speedtest.dart ...\n'
-    'Requires webcrypto in pub cache: dart pub cache add webcrypto:0.5.8\n'
+    'Requires webcrypto in pub cache: dart pub cache add webcrypto --version 0.5.8\n'
     'Or build manually: bash scripts/build_boringssl.sh',
   );
 }

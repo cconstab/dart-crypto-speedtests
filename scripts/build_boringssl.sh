@@ -4,7 +4,7 @@
 # Prerequisites:
 #   - cmake >= 3.6
 #   - C compiler (gcc/clang)
-#   - webcrypto in pub cache (dart pub cache add webcrypto:0.5.8)
+#   - webcrypto in pub cache (dart pub cache add webcrypto --version 0.5.8)
 #
 # Output: <project_root>/build/libboringssl_dart.so
 set -euo pipefail
@@ -26,7 +26,7 @@ if [ -z "$BORINGSSL_SRC" ]; then
   echo "Error: webcrypto not found in pub cache ($PUB_CACHE/hosted/pub.dev/webcrypto-*/third_party/boringssl)."
   echo ""
   echo "Add it with:"
-  echo "  dart pub cache add webcrypto:0.5.8"
+  echo "  dart pub cache add webcrypto --version 0.5.8"
   exit 1
 fi
 

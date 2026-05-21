@@ -5,7 +5,7 @@
 /// webcrypto and includes pre-generated platform assembly files (no Go needed).
 ///
 /// If webcrypto is not in pub cache, add it:
-///   dart pub cache add webcrypto:0.5.8
+///   dart pub cache add webcrypto --version 0.5.8
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
@@ -39,7 +39,7 @@ void main(List<String> args) async {
     if (boringSslSrc == null) {
       throw StateError(
         'BoringSSL source not found in pub cache.\n'
-        'Add it with: dart pub cache add webcrypto:0.5.8\n'
+        'Add it with: dart pub cache add webcrypto --version 0.5.8\n'
         'Then re-run: dart pub get',
       );
     }

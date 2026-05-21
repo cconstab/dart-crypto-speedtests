@@ -131,7 +131,7 @@ is present. Build it once:
 ```bash
 # Requires cmake + C compiler; uses the BoringSSL source bundled in webcrypto pub cache.
 # If webcrypto is not already in pub cache:
-dart pub cache add webcrypto:0.5.8
+dart pub cache add webcrypto --version 0.5.8
 
 bash scripts/build_boringssl.sh
 ```
