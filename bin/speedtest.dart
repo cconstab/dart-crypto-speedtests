@@ -20,22 +20,64 @@ void _fillRandom(Uint8List bytes) {
   for (var i = 0; i < bytes.length; i++) bytes[i] = rng.nextInt(256);
 }
 
-// Emit a one-line summary of CPU crypto features (best-effort, Linux only).
+class CpuInfo {
+  final String model;
+  final int    cores;
+  final List<String> hwAccel; // detected crypto-relevant flags
+
+  const CpuInfo({required this.model, required this.cores, required this.hwAccel});
+}
+
+CpuInfo getCpuInfo() {
+  if (Platform.isLinux) {
+    try {
+      final lines = File('/proc/cpuinfo').readAsStringSync().split('\n');
+      final modelLine = lines.firstWhere(
+        (l) => l.startsWith('model name') || l.startsWith('Model name'),
+        orElse: () => '',
+      );
+      final model = modelLine.contains(':')
+          ? modelLine.split(':').last.trim()
+          : Platform.localHostname;
+
+      final coreLines = lines.where((l) => l.startsWith('processor')).length;
+
+      final flagsLine = lines.firstWhere(
+        (l) => l.startsWith('flags') || l.startsWith('Features'),
+        orElse: () => '',
+      );
+      final flags = flagsLine.split(':').last.trim().split(' ').toSet();
+      final interesting = ['aes', 'sha_ni', 'avx2', 'avx512f', 'neon', 'sha2', 'pmull'];
+      final found = interesting.where(flags.contains).toList();
+
+      return CpuInfo(model: model, cores: coreLines, hwAccel: found);
+    } catch (_) {}
+  }
+  if (Platform.isMacOS) {
+    try {
+      final r = Process.runSync('sysctl', ['-n', 'machdep.cpu.brand_string']);
+      final model = (r.stdout as String).trim();
+      final c = Process.runSync('sysctl', ['-n', 'hw.logicalcpu']);
+      final cores = int.tryParse((c.stdout as String).trim()) ?? 0;
+      // Apple Silicon always has AES + SHA hw accel; Intel Macs report via sysctl
+      final feat = Process.runSync('sysctl', ['-n', 'hw.optional.arm.FEAT_AES',
+                                               'hw.optional.aes', 'hw.optional.sha2']);
+      final featStr = (feat.stdout as String);
+      final hwAccel = <String>[
+        if (featStr.contains('1')) 'aes',
+        if (featStr.contains('1')) 'sha2',
+      ];
+      return CpuInfo(model: model, cores: cores, hwAccel: hwAccel);
+    } catch (_) {}
+  }
+  return CpuInfo(model: Platform.operatingSystem, cores: 0, hwAccel: []);
+}
+
 void printCpuFeatures() {
-  if (!Platform.isLinux) return;
-  try {
-    final cpuinfo = File('/proc/cpuinfo').readAsStringSync();
-    final flagsLine = cpuinfo.split('\n').firstWhere(
-      (l) => l.startsWith('flags') || l.startsWith('Features'),
-      orElse: () => '',
-    );
-    final flags = flagsLine.split(':').last.trim().split(' ').toSet();
-    final interesting = ['aes', 'sha_ni', 'avx2', 'avx512f', 'neon'];
-    final found = interesting.where(flags.contains).toList();
-    if (found.isNotEmpty) {
-      print(chalk.cyan('CPU hw-accel flags: ${found.join(', ')}'));
-    }
-  } catch (_) {}
+  final info = getCpuInfo();
+  if (info.hwAccel.isNotEmpty) {
+    print(chalk.cyan('CPU hw-accel flags: ${info.hwAccel.join(', ')}'));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +201,19 @@ Future<void> main(List<String> arguments) async {
   if (rngResults.isNotEmpty) {
     final best = rngResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
     print('${chalk.green('🏆 Best RNG Performance:')} ${best.name} (${best.mbps} mbps)');
+  }
+
+  // CPU / platform footer
+  print('');
+  final cpu = getCpuInfo();
+  print(chalk.cyan('Platform:'));
+  print('  CPU  : ${cpu.model}');
+  if (cpu.cores > 0) print('  Cores: ${cpu.cores} logical');
+  print('  OS   : ${Platform.operatingSystemVersion}');
+  if (cpu.hwAccel.isNotEmpty) {
+    print('  HW acceleration: ${cpu.hwAccel.join(', ')}');
+  } else {
+    print('  HW acceleration: none detected');
   }
   print('${chalk.blue('=' * 70)}');
 }
