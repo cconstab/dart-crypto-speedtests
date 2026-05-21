@@ -13,7 +13,6 @@ Runs SHA-256, AES-256-CTR, and ChaCha20 across every major Dart crypto library:
 |---|---|
 | `package:crypto` | Pure Dart software |
 | `package:better_cryptography` | Pure Dart, optimised |
-| `package:webcrypto` (BoringSSL) | async FFI via Flutter's bundled BoringSSL |
 | `package:encrypt` + PointyCastle | Pure Dart |
 | `package:fastcrypt` | Rust via FFI |
 | `package:sodium` (libsodium) | Native FFI, runtime-loaded |
@@ -69,25 +68,6 @@ OpenSSL 3.5.4 from source at build time. This requires:
 - `make` (macOS/Linux)
 - `cmake`, `clang`, `llvm`, `nasm` (Windows — see below)
 
-The `webcrypto` package requires a one-time setup step that builds BoringSSL:
-
-```
-dart run webcrypto:setup
-```
-
-**macOS / Linux:** ensure `clang` and `cmake` are installed.
-
-**Windows:** install via [Chocolatey](https://chocolatey.org/):
-
-```powershell
-choco install cmake
-choco install clang
-choco install llvm
-choco install nasm
-```
-
-Then run `dart run webcrypto:setup`.
-
 ### Dart ≥ 3.12 — `openssl` package patch
 
 The published `openssl` 1.0.1 package has a build hook incompatibility with
@@ -109,7 +89,6 @@ brew install libsodium
 
 ```bash
 dart pub get
-dart run webcrypto:setup   # one-time BoringSSL build
 
 # Full suite: <size MB> <repeat>
 dart run bin/speedtest.dart 1 10

@@ -15,7 +15,10 @@ import 'package:pointycastle/stream/chacha20.dart';
 import 'package:fastcrypt/fastcrypt.dart';
 import 'package:sodium/sodium.dart';
 
-import 'package:webcrypto/webcrypto.dart' as webcrypto;
+void _fillRandom(Uint8List bytes) {
+  final rng = Random.secure();
+  for (var i = 0; i < bytes.length; i++) bytes[i] = rng.nextInt(256);
+}
 
 // Emit a one-line summary of CPU crypto features (best-effort, Linux only).
 void printCpuFeatures() {
@@ -215,26 +218,6 @@ Future<List<TestResult>> hashTest(
   print("Better vs Crypto: ${chalk.green("$pct")}%");
   results.add(TestResult('Better SHA256', mbps, betterMs));
 
-  // --- BoringSSL SHA-256 ---
-  line();
-  print("Start BoringSSL SHA256");
-  await _warmupAsync(warmups, () async =>
-      webcrypto.Hash.sha256.digestBytes(inputBytes));
-  count = 0;
-  sw..reset()..start();
-  while (count < repeat) {
-    await webcrypto.Hash.sha256.digestBytes(inputBytes);
-    stdout.write('.');
-    count++;
-  }
-  sw.stop();
-  var boringSslMs = sw.elapsedMilliseconds;
-  mbps = _mbps(inputBytes.length, repeat, boringSslMs);
-  print("\n$boringSslMs ms  ${chalk.green('$mbps')} mbps");
-  pct = boringSslMs == 0 ? 0 : ((softwareMs / boringSslMs) * 100).round() - 100;
-  print("BoringSSL vs Crypto: ${chalk.green("$pct")}%");
-  results.add(TestResult('BoringSSL SHA256', mbps, boringSslMs));
-
   // --- OpenSSL SHA-256 ---
   if (openssl != null) {
     line();
@@ -306,7 +289,7 @@ Future<List<TestResult>> aesctrTest(
   better.AesCtr bAlgorithm = better.AesCtr.with256bits(macAlgorithm: better.Hmac.sha256());
   var bSecretKey = await bAlgorithm.newSecretKey();
   final bctr = Uint8List(16);
-  webcrypto.fillRandomBytes(bctr);
+  _fillRandom(bctr);
   await _warmupAsync(warmups, () async {
     final box = await bAlgorithm.encrypt(inputBytes, secretKey: bSecretKey, nonce: bctr);
     await bAlgorithm.decrypt(box, secretKey: bSecretKey);
@@ -328,42 +311,14 @@ Future<List<TestResult>> aesctrTest(
   print("Better vs Software: ${chalk.green("$pct")}%");
   results.add(TestResult('Better AES-CTR', mbps, betterMs));
 
-  // --- BoringSSL AES-CTR ---
-  line();
-  print("Start BoringSSL AES-CTR");
-  final bsslKey = await webcrypto.AesCtrSecretKey.generateKey(256);
-  final ctr     = Uint8List(16);
-  webcrypto.fillRandomBytes(ctr);
-  const N = 64;
-  await _warmupAsync(warmups, () async {
-    final c   = await bsslKey.encryptBytes(inputBytes, ctr, N);
-    await bsslKey.decryptBytes(c, ctr, N);
-  });
-  count = 0;
-  sw..reset()..start();
-  while (count < repeat) {
-    final c   = await bsslKey.encryptBytes(inputBytes, ctr, N);
-    final dec = await bsslKey.decryptBytes(c, ctr, N);
-    stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
-    count++;
-  }
-  sw.stop();
-  var boringSslMs = sw.elapsedMilliseconds;
-  mbps = _mbps(inputBytes.length, repeat, boringSslMs);
-  print("\n$boringSslMs ms  ${chalk.green('$mbps')} mbps");
-  pct = boringSslMs == 0 ? 0 : ((softwareMs / boringSslMs) * 100).round() - 100;
-  print("BoringSSL vs Software: ${chalk.green("$pct")}%");
-  results.add(TestResult('BoringSSL AES-CTR', mbps, boringSslMs));
-
   // --- OpenSSL AES-256-CTR ---
   if (openssl != null) {
     line();
     print("Start OpenSSL AES-256-CTR");
     final sslKey = Uint8List(32);
     final sslIv  = Uint8List(16);
-    webcrypto.fillRandomBytes(sslKey);
-    webcrypto.fillRandomBytes(sslIv);
+    _fillRandom(sslKey);
+    _fillRandom(sslIv);
     _warmup(warmups, () {
       final enc = openssl.aes256CtrEncrypt(inputBytes, sslKey, sslIv);
       openssl.aes256CtrDecrypt(enc, sslKey, sslIv);
@@ -409,8 +364,8 @@ Future<List<TestResult>> chacha20Test(
   print("Start PointyCastle ChaCha20");
   final pcKey   = Uint8List(32);
   final pcNonce = Uint8List(8);
-  webcrypto.fillRandomBytes(pcKey);
-  webcrypto.fillRandomBytes(pcNonce);
+  _fillRandom(pcKey);
+  _fillRandom(pcNonce);
   // Pre-allocate output buffers – reused every iteration.
   final pcEncrypted = Uint8List(inputBytes.length);
   final pcDecrypted = Uint8List(inputBytes.length);
@@ -444,7 +399,7 @@ Future<List<TestResult>> chacha20Test(
   final bChacha = better.Chacha20.poly1305Aead();
   var bSecretKey = await bChacha.newSecretKey();
   final bNonce = Uint8List(12);
-  webcrypto.fillRandomBytes(bNonce);
+  _fillRandom(bNonce);
   await _warmupAsync(warmups, () async {
     final box = await bChacha.encrypt(inputBytes, secretKey: bSecretKey, nonce: bNonce);
     await bChacha.decrypt(box, secretKey: bSecretKey);
@@ -474,8 +429,8 @@ Future<List<TestResult>> chacha20Test(
     print("Start OpenSSL ChaCha20");
     final sslKey = Uint8List(32);
     final sslIv  = Uint8List(16); // EVP_chacha20: 4-byte counter + 12-byte nonce
-    webcrypto.fillRandomBytes(sslKey);
-    webcrypto.fillRandomBytes(sslIv);
+    _fillRandom(sslKey);
+    _fillRandom(sslIv);
     _warmup(warmups, () {
       final enc = openssl.chacha20Encrypt(inputBytes, sslKey, sslIv);
       openssl.chacha20Decrypt(enc, sslKey, sslIv);
@@ -699,13 +654,13 @@ List<TestResult> opensslPkgTest(
 
   final aesKey = Uint8List(32);
   final aesIv  = Uint8List(16);
-  webcrypto.fillRandomBytes(aesKey);
-  webcrypto.fillRandomBytes(aesIv);
+  _fillRandom(aesKey);
+  _fillRandom(aesIv);
 
   final chaKey = Uint8List(32);
   final chaIv  = Uint8List(16);
-  webcrypto.fillRandomBytes(chaKey);
-  webcrypto.fillRandomBytes(chaIv);
+  _fillRandom(chaKey);
+  _fillRandom(chaIv);
 
   // --- SHA-256 naive ---
   line();
