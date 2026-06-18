@@ -4,13 +4,17 @@
 /// Requires OpenSSL 3.5.0+ — gracefully skips unavailable algorithms.
 ///
 /// Build:  dart compile exe bin/pqcbench.dart -o pqcbench
-/// Run:    ./pqcbench [iterations]
+/// Run:    ./pqcbench [iterations] [--threads N]
 ///         Default iterations: 100 for KEM/ML-DSA, 10 for SLH-DSA (slow sign)
+///         --threads N: run concurrent throughput benchmark with N isolates
+///                      (each isolate = true OS thread via FFI native calls)
 ///
 /// Supported platforms: Linux x86_64/aarch64, macOS, Windows.
 
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -421,6 +425,109 @@ class _SigResult {
 }
 
 // ---------------------------------------------------------------------------
+// Isolate-based concurrent throughput benchmark
+// ---------------------------------------------------------------------------
+
+// Message types for isolate communication — must use only sendable types.
+
+class _IsolateArgs {
+  final SendPort sendPort;
+  final String libPath;
+  final String algo;
+  final int iters;
+  final String type; // 'kem' | 'sig'
+  final List<int> message; // for sig
+  const _IsolateArgs(
+      this.sendPort, this.libPath, this.algo, this.iters, this.type,
+      [this.message = const []]);
+}
+
+class _IsolateResult {
+  final String algo;
+  final String type;
+  final int iters;
+  final int totalUs; // wall-clock µs this isolate spent
+  final bool ok;
+  const _IsolateResult(this.algo, this.type, this.iters, this.totalUs, this.ok);
+}
+
+/// Entry point for each worker isolate.
+/// Each isolate opens its own handle to libcrypto — perfectly safe in OpenSSL 3.x.
+void _isolateWorker(_IsolateArgs args) {
+  final pqc = PqcBench(args.libPath);
+  final message = Uint8List.fromList(args.message);
+  bool ok = true;
+  final sw = Stopwatch()..start();
+
+  if (args.type == 'kem') {
+    Pointer<EvpPkey>? key;
+    for (var i = 0; i < args.iters; i++) {
+      key?.let(pqc.freeKey);
+      key = pqc.tryKeygen(args.algo);
+      if (key == null) {
+        ok = false;
+        break;
+      }
+      final (ct, ss1) = pqc.encapsulate(key);
+      final ss2 = pqc.decapsulate(key, ct);
+      if (!_bytesEqual(ss1, ss2)) ok = false;
+    }
+    key?.let(pqc.freeKey);
+  } else {
+    Pointer<EvpPkey>? key = pqc.tryKeygen(args.algo);
+    if (key == null) {
+      ok = false;
+    } else {
+      for (var i = 0; i < args.iters; i++) {
+        final sig = pqc.sign(key, message);
+        if (!pqc.verify(key, message, sig)) ok = false;
+      }
+      pqc.freeKey(key);
+    }
+  }
+
+  sw.stop();
+  args.sendPort.send(_IsolateResult(
+      args.algo, args.type, args.iters, sw.elapsedMicroseconds, ok));
+}
+
+/// Run [threads] isolates concurrently, each performing [itersEach] complete
+/// keygen+encap+decap (KEM) or keygen+sign+verify (sig) cycles.
+/// Returns aggregate ops/sec across all isolates.
+Future<({int totalOps, int wallUs, bool ok})> _runConcurrent(
+    String libPath, String algo, String type, int threads, int itersEach,
+    [List<int> message = const []]) async {
+  final receivePort = ReceivePort();
+  final results = <_IsolateResult>[];
+  final completer = Completer<void>();
+  int received = 0;
+
+  receivePort.listen((msg) {
+    if (msg is _IsolateResult) {
+      results.add(msg);
+      received++;
+      if (received == threads) completer.complete();
+    }
+  });
+
+  final wallSw = Stopwatch()..start();
+  for (var i = 0; i < threads; i++) {
+    await Isolate.spawn(
+        _isolateWorker,
+        _IsolateArgs(
+            receivePort.sendPort, libPath, algo, itersEach, type, message));
+  }
+
+  await completer.future;
+  wallSw.stop();
+  receivePort.close();
+
+  final totalOps = results.fold<int>(0, (s, r) => s + r.iters);
+  final ok = results.every((r) => r.ok);
+  return (totalOps: totalOps, wallUs: wallSw.elapsedMicroseconds, ok: ok);
+}
+
+// ---------------------------------------------------------------------------
 // Benchmark runners
 // ---------------------------------------------------------------------------
 
@@ -633,11 +740,76 @@ void _printSigSummary(String title, List<_SigResult> results) {
 }
 
 // ---------------------------------------------------------------------------
+// Concurrent throughput summary
+// ---------------------------------------------------------------------------
+
+void _printConcurrentHeader(int threads) {
+  print('');
+  print(chalk.blue('=' * 82));
+  print(chalk.blue(
+      'CONCURRENT THROUGHPUT — $threads isolates × libcrypto FFI (true OS threads)'));
+  print(chalk.blue('=' * 82));
+  print(chalk.yellow(
+      'Each isolate opens its own DynamicLibrary handle and runs independently.'));
+  print(chalk
+      .yellow('Wall-clock time measures from first dispatch to last result.'));
+  print('');
+  print(
+      '┌──────────────────────┬──────────┬──────────┬──────────┬──────────────────┐');
+  print(
+      '│ Algorithm            │ Threads  │ Ops      │ Wall µs  │ Throughput       │');
+  print(
+      '├──────────────────────┼──────────┼──────────┼──────────┼──────────────────┤');
+}
+
+void _printConcurrentRow(
+    String algo, int threads, int ops, int wallUs, double? singleOpsPerSec) {
+  final throughput = wallUs == 0 ? 0 : (ops * 1000000 / wallUs).round();
+  final scaling = singleOpsPerSec != null && singleOpsPerSec > 0
+      ? ' (${(throughput / singleOpsPerSec).toStringAsFixed(2)}×)'
+      : '';
+  print(
+      '│ ${algo.padRight(20)} │ ${threads.toString().padLeft(8)} │ ${ops.toString().padLeft(8)} │ ${wallUs.toString().padLeft(8)} │ ${('$throughput/s$scaling').padRight(16)} │');
+}
+
+void _printConcurrentFooter() {
+  print(
+      '└──────────────────────┴──────────┴──────────┴──────────┴──────────────────┘');
+  print(chalk.yellow(
+      'Scaling > 1.0 means OpenSSL parallelises well across cores. < 1.0 indicates contention.'));
+}
+
+// ---------------------------------------------------------------------------
+// Pointer.let helper — avoids null check boilerplate
+// ---------------------------------------------------------------------------
+
+extension _PtrLet<T extends NativeType> on Pointer<T> {
+  void let(void Function(Pointer<T>) fn) => fn(this);
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
-void main(List<String> args) {
-  final iters = args.isNotEmpty ? int.parse(args[0]) : 100;
+Future<void> main(List<String> args) async {
+  // Parse args: [iterations] [--threads N]
+  int iters = 100;
+  int threads = 1;
+  final positional = <String>[];
+  for (var i = 0; i < args.length; i++) {
+    if (args[i] == '--threads' || args[i] == '-j') {
+      if (i + 1 >= args.length) {
+        stderr.writeln('--threads requires a value');
+        exit(1);
+      }
+      threads = int.parse(args[++i]);
+    } else {
+      positional.add(args[i]);
+    }
+  }
+  if (positional.isNotEmpty) iters = int.parse(positional[0]);
+  if (threads < 1) threads = 1;
+
   final slhIters = max(5, iters ~/ 10); // SLH-DSA sign is 10-100× slower
 
   final path = _libPath();
@@ -646,6 +818,9 @@ void main(List<String> args) {
   print(chalk.cyan('Platform: ${Platform.operatingSystem}'));
   print(chalk
       .cyan('Iters   : KEM/ML-DSA=$iters  SLH-DSA=$slhIters (median of ops)'));
+  if (threads > 1)
+    print(
+        chalk.cyan('Threads : $threads concurrent isolates (throughput mode)'));
 
   PqcBench pqc;
   try {
@@ -694,13 +869,12 @@ void main(List<String> args) {
   }
 
   // ── SLH-DSA ─────────────────────────────────────────────────────────────
-  // Test a representative selection: SHA2 small/fast and SHAKE small/fast at 128-bit security
   _section('SLH-DSA (FIPS 205) — Stateless Hash-Based Signatures');
   print(chalk.yellow(
       '  Note: SLH-DSA-*s (small) variants have very slow sign (~seconds each)'));
   final slhAlgos = [
-    'SLH-DSA-SHA2-128s', // small sig, very slow sign
-    'SLH-DSA-SHA2-128f', // fast sign, larger sig
+    'SLH-DSA-SHA2-128s',
+    'SLH-DSA-SHA2-128f',
     'SLH-DSA-SHAKE-128s',
     'SLH-DSA-SHAKE-128f',
   ];
@@ -725,6 +899,67 @@ void main(List<String> args) {
   if (slhResults.isNotEmpty)
     _printSigSummary(
         'SLH-DSA (FIPS 205) — STATELESS HASH-BASED SIGNATURES', slhResults);
+
+  // ── Concurrent throughput ────────────────────────────────────────────────
+  if (threads > 1) {
+    _section('CONCURRENT THROUGHPUT (--threads $threads)');
+    print(chalk.yellow(
+        '  Each Dart isolate = OS thread. FFI native calls bypass the Dart event loop.'));
+    print(chalk.yellow(
+        '  OpenSSL itself is single-threaded per-call; parallelism comes from isolates.'));
+
+    // Build lookup: algo -> single-threaded ops/sec from results above
+    final singleOps = <String, double>{};
+    for (final r in kemResults) {
+      // median of keygen+encap+decap per full cycle
+      final cycleUs = r.keygenUs + r.encapUs + r.decapUs;
+      if (cycleUs > 0) singleOps[r.name] = 1000000 / cycleUs;
+    }
+    for (final r in [...mlDsaResults, ...slhResults]) {
+      final cycleUs = r.keygenUs + r.signUs + r.verifyUs;
+      if (cycleUs > 0) singleOps[r.name] = 1000000 / cycleUs;
+    }
+
+    // Iters per isolate: keep total work similar to single-threaded run
+    final concIters = max(5, iters ~/ threads);
+    final concSlhIters = max(2, slhIters ~/ threads);
+
+    _printConcurrentHeader(threads);
+
+    for (final algo in kemAlgos) {
+      final probe = pqc.tryKeygen(algo);
+      if (probe == null) continue;
+      pqc.freeKey(probe);
+      stdout.write('  $algo (${threads}×$concIters ops) ... ');
+      final r = await _runConcurrent(path, algo, 'kem', threads, concIters);
+      stdout.writeln(r.ok ? 'ok' : chalk.red('MISMATCH'));
+      _printConcurrentRow(algo, threads, r.totalOps, r.wallUs, singleOps[algo]);
+    }
+    for (final algo in mlDsaAlgos) {
+      final probe = pqc.tryKeygen(algo);
+      if (probe == null) continue;
+      pqc.freeKey(probe);
+      stdout.write('  $algo (${threads}×$concIters ops) ... ');
+      final r = await _runConcurrent(
+          path, algo, 'sig', threads, concIters, message.toList());
+      stdout.writeln(r.ok ? 'ok' : chalk.red('FAIL'));
+      _printConcurrentRow(algo, threads, r.totalOps, r.wallUs, singleOps[algo]);
+    }
+    for (final algo in slhAlgos) {
+      final thisIters =
+          algo.endsWith('s') ? max(1, concSlhIters ~/ 2) : concSlhIters;
+      final probe = pqc.tryKeygen(algo);
+      if (probe == null) continue;
+      pqc.freeKey(probe);
+      stdout.write('  $algo (${threads}×$thisIters ops) ... ');
+      final r = await _runConcurrent(
+          path, algo, 'sig', threads, thisIters, message.toList());
+      stdout.writeln(r.ok ? 'ok' : chalk.red('FAIL'));
+      _printConcurrentRow(algo, threads, r.totalOps, r.wallUs, singleOps[algo]);
+    }
+
+    _printConcurrentFooter();
+  }
 
   print('');
   print(chalk.blue('=' * 78));
