@@ -391,6 +391,124 @@ class _Reader {
     }
     return result;
   }
+
+  /// Yields all remaining buffered bytes, then future bytes as they arrive.
+  /// The external subscription feeding push() must remain active.
+  Stream<Uint8List> rest() async* {
+    while (true) {
+      while (_chunks.isNotEmpty) {
+        final chunk = _chunks.removeAt(0);
+        _available -= chunk.length;
+        yield chunk;
+      }
+      if (_error != null) throw _error!;
+      if (_done) return;
+      _wakeup = Completer();
+      await _wakeup!.future;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stream transformers — hash+encrypt (client) and decrypt+verify (server)
+// ---------------------------------------------------------------------------
+
+/// Per-block result emitted by [CryptoDecodeTransformer].
+class _DecodeEvent {
+  final int bytes;
+  final int decryptUs;
+  final bool hashOk;
+  const _DecodeEvent(this.bytes, this.decryptUs, this.hashOk);
+}
+
+/// Client-side transformer: takes a stream of plaintext blocks, computes
+/// SHA-256 and encrypts each block, yields [hash(32) || ciphertext] frames.
+/// Accumulates [hashUs] and [encryptUs] for reporting.
+class CryptoEncodeTransformer
+    extends StreamTransformerBase<Uint8List, Uint8List> {
+  final OpenSslCrypto _crypto;
+  final int _algo;
+  final Uint8List _key;
+  final Uint8List _iv;
+
+  int hashUs = 0;
+  int encryptUs = 0;
+
+  CryptoEncodeTransformer(this._crypto, this._algo, this._key, this._iv);
+
+  @override
+  Stream<Uint8List> bind(Stream<Uint8List> stream) async* {
+    await for (final block in stream) {
+      final hashSw = Stopwatch()..start();
+      final hash = _crypto.sha256(block);
+      hashUs += hashSw.elapsedMicroseconds;
+
+      final encSw = Stopwatch()..start();
+      final cipher = _algo == _algoAes
+          ? _crypto.aes256CtrEncrypt(block, _key, _iv)
+          : _crypto.chacha20Encrypt(block, _key, _iv);
+      encryptUs += encSw.elapsedMicroseconds;
+
+      // Emit hash || ciphertext as a single wire frame.
+      final frame = Uint8List(32 + cipher.length);
+      frame.setRange(0, 32, hash);
+      frame.setRange(32, 32 + cipher.length, cipher);
+      yield frame;
+    }
+  }
+}
+
+/// Server-side transformer: receives raw bytes (post-handshake), buffers them
+/// internally, and for each complete [hash(32) || ciphertext(blockLen)] frame
+/// decrypts and hash-verifies, yielding a [_DecodeEvent] per block.
+class CryptoDecodeTransformer
+    extends StreamTransformerBase<Uint8List, _DecodeEvent> {
+  final OpenSslCrypto _crypto;
+  final int _algo;
+  final Uint8List _key;
+  final Uint8List _iv;
+  final int _blockLen;
+  final int _repeat;
+
+  CryptoDecodeTransformer(this._crypto, this._algo, this._key, this._iv,
+      this._blockLen, this._repeat);
+
+  @override
+  Stream<_DecodeEvent> bind(Stream<Uint8List> incoming) {
+    final ctrl = StreamController<_DecodeEvent>();
+    final reader = _Reader();
+    final sub = incoming.listen(
+      reader.push,
+      onDone: () => reader.close(),
+      onError: (e) => reader.close(e),
+    );
+
+    unawaited(Future(() async {
+      try {
+        for (var i = 0; i < _repeat; i++) {
+          final sentHash = await reader.read(32);
+          final ciphertext = await reader.read(_blockLen);
+
+          final sw = Stopwatch()..start();
+          final plain = _algo == _algoAes
+              ? _crypto.aes256CtrDecrypt(ciphertext, _key, _iv)
+              : _crypto.chacha20Decrypt(ciphertext, _key, _iv);
+          sw.stop();
+
+          final hashOk = _bytesEq(sentHash, _crypto.sha256(plain));
+          ctrl.add(
+              _DecodeEvent(ciphertext.length, sw.elapsedMicroseconds, hashOk));
+        }
+      } catch (e, st) {
+        ctrl.addError(e, st);
+      } finally {
+        await sub.cancel();
+        ctrl.close();
+      }
+    }));
+
+    return ctrl.stream;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +518,7 @@ class _Reader {
 Future<void> _handleConn(Socket socket, String libPath) async {
   final peer = '${socket.remoteAddress.address}:${socket.remotePort}';
   final reader = _Reader();
+  // sub feeds reader for both handshake and block frames via reader.rest()
   final sub = socket.listen(
     reader.push,
     onDone: () => reader.close(),
@@ -414,32 +533,26 @@ Future<void> _handleConn(Socket socket, String libPath) async {
     print(chalk.cyan(
         '  [$peer] $algoName  ${hs.blockLen ~/ (1024 * 1024)} MB × ${hs.repeat} blocks'));
 
+    // Pipe remaining socket bytes through the decode+verify transformer.
+    final decoder = CryptoDecodeTransformer(
+        crypto, hs.algo, hs.key, hs.iv, hs.blockLen, hs.repeat);
+
     int totalBytes = 0, okBlocks = 0, failBlocks = 0, decryptUs = 0;
 
-    for (var i = 0; i < hs.repeat; i++) {
-      final sentHash = await reader.read(32);
-      final ciphertext = await reader.read(hs.blockLen);
-
-      final sw = Stopwatch()..start();
-      final plain = hs.algo == _algoAes
-          ? crypto.aes256CtrDecrypt(ciphertext, hs.key, hs.iv)
-          : crypto.chacha20Decrypt(ciphertext, hs.key, hs.iv);
-      sw.stop();
-      decryptUs += sw.elapsedMicroseconds;
-
-      final hashOk = _bytesEq(sentHash, crypto.sha256(plain));
-      if (hashOk)
+    await for (final event in reader.rest().transform(decoder)) {
+      final blockIdx = okBlocks + failBlocks + 1;
+      totalBytes += event.bytes;
+      decryptUs += event.decryptUs;
+      if (event.hashOk)
         okBlocks++;
       else
         failBlocks++;
-      totalBytes += ciphertext.length;
 
-      final mbps = sw.elapsedMicroseconds == 0
+      final mbps = event.decryptUs == 0
           ? 0
-          : (ciphertext.length * 8 / 1e6 / (sw.elapsedMicroseconds / 1e6))
-              .round();
-      print('  [$peer] block ${i + 1}/${hs.repeat}  '
-          '${hashOk ? chalk.green("hash ok") : chalk.red("HASH MISMATCH")}  '
+          : (event.bytes * 8 / 1e6 / (event.decryptUs / 1e6)).round();
+      print('  [$peer] block $blockIdx/${hs.repeat}  '
+          '${event.hashOk ? chalk.green("hash ok") : chalk.red("HASH MISMATCH")}  '
           '— decrypt $mbps Mbps');
     }
 
@@ -448,8 +561,8 @@ Future<void> _handleConn(Socket socket, String libPath) async {
 
     final totalMbps =
         decryptUs == 0 ? 0 : (totalBytes * 8 / 1e6 / (decryptUs / 1e6)).round();
-    print(chalk.green('  [$peer] done  ok=$okBlocks  fail=$failBlocks  '
-        'server-decrypt=$totalMbps Mbps'));
+    print(chalk.green(
+        '  [$peer] done  ok=$okBlocks  fail=$failBlocks  server-decrypt=$totalMbps Mbps'));
   } catch (e) {
     print(chalk.red('  [$peer] error: $e'));
   } finally {
@@ -514,15 +627,20 @@ class _ClientArgs {
 class _ClientResult {
   final int threadId;
   final int wireBytes; // total plaintext bytes sent
-  final int wallUs; // total time: send + receive summary
+  final int wallUs; // total time: encrypt + TCP + server ack
   final int okBlocks;
   final int failBlocks;
   final int serverDecryptUs; // pure OpenSSL decrypt time on server
+  final int clientHashUs; // SHA-256 time on client
+  final int clientEncryptUs; // cipher time on client
   final bool hasError;
   final String errorMsg;
   const _ClientResult(this.threadId, this.wireBytes, this.wallUs, this.okBlocks,
       this.failBlocks, this.serverDecryptUs,
-      {this.hasError = false, this.errorMsg = ''});
+      {this.clientHashUs = 0,
+      this.clientEncryptUs = 0,
+      this.hasError = false,
+      this.errorMsg = ''});
 }
 
 /// Fills a Uint8List with pseudo-random bytes using 4-byte chunks for speed.
@@ -540,21 +658,14 @@ Future<void> _clientWorker(_ClientArgs args) async {
   final crypto = OpenSslCrypto(args.libPath);
   final secRng = Random.secure();
 
-  // Key + IV use CSPRNG; plaintext uses fast PRNG (it's a benchmark, not a protocol)
+  // Key + IV use CSPRNG; plaintext uses fast PRNG (benchmark, not a protocol)
   final key = Uint8List.fromList(List.generate(32, (_) => secRng.nextInt(256)));
   final iv = Uint8List.fromList(List.generate(16, (_) => secRng.nextInt(256)));
 
   try {
-    // Generate plaintext once; reuse for all blocks (throughput test, not content test)
+    // Generate plaintext once; reuse for all blocks (throughput test)
     final plain = _randomData(args.blockBytes);
-    final hash = crypto.sha256(plain);
-
-    final Uint8List cipher;
-    if (args.algo == _algoAes) {
-      cipher = crypto.aes256CtrEncrypt(plain, key, iv);
-    } else {
-      cipher = crypto.chacha20Encrypt(plain, key, iv);
-    }
+    final encoder = CryptoEncodeTransformer(crypto, args.algo, key, iv);
 
     final socket = await Socket.connect(args.host, args.port);
     socket.setOption(SocketOption.tcpNoDelay, true);
@@ -572,10 +683,12 @@ Future<void> _clientWorker(_ClientArgs args) async {
     // Send handshake
     socket.add(_encHandshake(args.algo, key, iv, args.repeat, args.blockBytes));
 
-    // Send all blocks back-to-back (pipeline: don't wait for per-block ACKs)
-    for (var i = 0; i < args.repeat; i++) {
-      socket.add(hash);
-      socket.add(cipher);
+    // Hash+encrypt each block through the transformer, send immediately.
+    // Wall clock includes encrypt + TCP send for all blocks.
+    final blockStream =
+        Stream.fromIterable(List.generate(args.repeat, (_) => plain));
+    await for (final frame in blockStream.transform(encoder)) {
+      socket.add(frame);
     }
     await socket.flush();
 
@@ -592,7 +705,9 @@ Future<void> _clientWorker(_ClientArgs args) async {
         sw.elapsedMicroseconds,
         summary.ok,
         summary.fail,
-        summary.decryptUs));
+        summary.decryptUs,
+        clientHashUs: encoder.hashUs,
+        clientEncryptUs: encoder.encryptUs));
   } catch (e) {
     crypto.dispose();
     args.sendPort.send(_ClientResult(args.threadId, 0, 0, 0, 0, 0,
@@ -663,24 +778,24 @@ Future<void> _runClient(String host, int port, int algo, int blockMb,
   // Use slowest thread's wall time for true parallel throughput
   final maxWallUs =
       successes.fold<int>(0, (m, r) => r.wallUs > m ? r.wallUs : m);
-  // Server decrypt: sum across all connections (they ran in parallel)
+  // CPU times: sum across connections (they ran in parallel on separate cores)
   final totalSrvDecUs = successes.fold<int>(0, (s, r) => s + r.serverDecryptUs);
+  final totalClientHashUs =
+      successes.fold<int>(0, (s, r) => s + r.clientHashUs);
+  final totalClientEncUs =
+      successes.fold<int>(0, (s, r) => s + r.clientEncryptUs);
 
-  // Wire Mbps = total plaintext bits / slowest-thread wall seconds
-  // (includes client encrypt + TCP round-trip + server decrypt)
-  final wireMbps = maxWallUs == 0
-      ? 0
-      : (totalWireBytes * 8 / 1e6 / (maxWallUs / 1e6)).round();
+  int _mbps(int totalBytes, int cpuUs) =>
+      cpuUs == 0 ? 0 : (totalBytes * 8 / 1e6 / (cpuUs / 1e6)).round();
 
-  // Server decrypt Mbps = total bytes decrypted / aggregate decrypt CPU time
-  final srvDecMbps = totalSrvDecUs == 0
-      ? 0
-      : (totalWireBytes * 8 / 1e6 / (totalSrvDecUs / 1e6)).round();
+  final wireMbps = _mbps(totalWireBytes, maxWallUs);
+  final srvDecMbps = _mbps(totalWireBytes, totalSrvDecUs);
+  final clientHashMbps = _mbps(totalWireBytes, totalClientHashUs);
+  final clientEncMbps = _mbps(totalWireBytes, totalClientEncUs);
 
   final hashStatus = totalFail == 0
-      ? chalk.green('✓ all ${totalOk} blocks verified')
-      : chalk
-          .red('${totalFail} HASH MISMATCH(ES) — data corrupted in transit!');
+      ? chalk.green('✓ all $totalOk blocks verified')
+      : chalk.red('$totalFail HASH MISMATCH(ES) — data corrupted in transit!');
 
   print(chalk.blue('═' * 64));
   print(chalk.blue('  NETWORK CRYPTO BENCHMARK RESULTS'));
@@ -695,15 +810,21 @@ Future<void> _runClient(String host, int port, int algo, int blockMb,
   print('  │ Metric                               │    Speed    │');
   print('  ├──────────────────────────────────────┼─────────────┤');
   print(
+      '  │ Client SHA-256 hash                  │ ${('$clientHashMbps Mbps').padLeft(11)} │');
+  print(
+      '  │ Client encrypt (OpenSSL FFI)         │ ${('$clientEncMbps Mbps').padLeft(11)} │');
+  print(
       '  │ Wire throughput (client wall time)   │ ${('$wireMbps Mbps').padLeft(11)} │');
   print(
-      '  │ Server decrypt (pure OpenSSL FFI)    │ ${('$srvDecMbps Mbps').padLeft(11)} │');
+      '  │ Server decrypt (OpenSSL FFI)         │ ${('$srvDecMbps Mbps').padLeft(11)} │');
   print('  └──────────────────────────────────────┴─────────────┘');
   print('');
   print(chalk.yellow(
-      '  Wire = client encrypt + TCP send + server decrypt + TCP reply.'));
+      '  Client hash/encrypt = pure OpenSSL CPU time on sender (excludes TCP).'));
   print(chalk.yellow(
-      '  Server decrypt = pure OpenSSL time on receiver (excludes network).'));
+      '  Wire = encrypt + TCP send + server decrypt + TCP reply (wall clock).'));
+  print(chalk.yellow(
+      '  Server decrypt = pure OpenSSL CPU time on receiver (excludes network).'));
 
   if (threads > 1 && successes.length > 1) {
     // Per-thread average for scaling comparison
