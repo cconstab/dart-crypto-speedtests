@@ -1,7 +1,6 @@
 import 'package:dart_crypto_speedtests/dart_crypto_speedtests.dart'; // OpenSslCrypto (system libcrypto FFI), OpenSslPkgCrypto
 import 'dart:typed_data';
 import 'dart:convert' show utf8;
-import 'dart:ffi' show DynamicLibrary; // needed by sodiumTest
 import 'dart:io';
 import 'dart:math';
 import 'package:collection/collection.dart';
@@ -22,10 +21,11 @@ void _fillRandom(Uint8List bytes) {
 
 class CpuInfo {
   final String model;
-  final int    cores;
+  final int cores;
   final List<String> hwAccel; // detected crypto-relevant flags
 
-  const CpuInfo({required this.model, required this.cores, required this.hwAccel});
+  const CpuInfo(
+      {required this.model, required this.cores, required this.hwAccel});
 }
 
 CpuInfo getCpuInfo() {
@@ -47,7 +47,15 @@ CpuInfo getCpuInfo() {
         orElse: () => '',
       );
       final flags = flagsLine.split(':').last.trim().split(' ').toSet();
-      final interesting = ['aes', 'sha_ni', 'avx2', 'avx512f', 'neon', 'sha2', 'pmull'];
+      final interesting = [
+        'aes',
+        'sha_ni',
+        'avx2',
+        'avx512f',
+        'neon',
+        'sha2',
+        'pmull'
+      ];
       final found = interesting.where(flags.contains).toList();
 
       return CpuInfo(model: model, cores: coreLines, hwAccel: found);
@@ -60,8 +68,12 @@ CpuInfo getCpuInfo() {
       final c = Process.runSync('sysctl', ['-n', 'hw.logicalcpu']);
       final cores = int.tryParse((c.stdout as String).trim()) ?? 0;
       // Apple Silicon always has AES + SHA hw accel; Intel Macs report via sysctl
-      final feat = Process.runSync('sysctl', ['-n', 'hw.optional.arm.FEAT_AES',
-                                               'hw.optional.aes', 'hw.optional.sha2']);
+      final feat = Process.runSync('sysctl', [
+        '-n',
+        'hw.optional.arm.FEAT_AES',
+        'hw.optional.aes',
+        'hw.optional.sha2'
+      ]);
       final featStr = (feat.stdout as String);
       final hwAccel = <String>[
         if (featStr.contains('1')) 'aes',
@@ -135,23 +147,28 @@ Future<void> main(List<String> arguments) async {
   }
 
   line();
-  allResults.addAll(await hashTest(text, inputBytes, repeat, openssl: openssl, boring: boring));
+  allResults.addAll(await hashTest(text, inputBytes, repeat,
+      openssl: openssl, boring: boring));
   line();
-  allResults.addAll(await aesctrTest(text, inputBytes, repeat, openssl: openssl, boring: boring));
+  allResults.addAll(await aesctrTest(text, inputBytes, repeat,
+      openssl: openssl, boring: boring));
   line();
   allResults.addAll(fastcryptTest(text, repeat));
   line();
-  allResults.addAll(await chacha20Test(text, inputBytes, repeat, openssl: openssl, boring: boring));
+  allResults.addAll(await chacha20Test(text, inputBytes, repeat,
+      openssl: openssl, boring: boring));
   line();
   allResults.addAll(await sodiumTest(text, inputBytes, repeat));
   line();
 
   if (opensslPkg != null) {
-    allResults.addAll(opensslPkgTest(inputBytes, repeat, pkgCrypto: opensslPkg));
+    allResults
+        .addAll(opensslPkgTest(inputBytes, repeat, pkgCrypto: opensslPkg));
     line();
   }
 
-  allResults.addAll(randBytesTest(inputBytes, repeat, openssl: openssl, boring: boring));
+  allResults.addAll(
+      randBytesTest(inputBytes, repeat, openssl: openssl, boring: boring));
   line();
 
   openssl?.dispose();
@@ -168,21 +185,29 @@ Future<void> main(List<String> arguments) async {
   print('  • Iterations: $repeat');
   print('');
 
-  final hashResults = allResults.where((r) => r.name.contains('SHA256')).toList();
-  final rngResults  = allResults.where((r) => r.name.contains('RAND')).toList();
-  final encResults  = allResults.where((r) => !r.name.contains('SHA256') && !r.name.contains('RAND')).toList();
+  final hashResults =
+      allResults.where((r) => r.name.contains('SHA256')).toList();
+  final rngResults = allResults.where((r) => r.name.contains('RAND')).toList();
+  final encResults = allResults
+      .where((r) => !r.name.contains('SHA256') && !r.name.contains('RAND'))
+      .toList();
 
   void printTable(String title, List<TestResult> rows) {
     if (rows.isEmpty) return;
     print('${chalk.yellow(title)}');
     print('');
-    print('┌───────────────────────────────────┬─────────────┬───────────────┐');
-    print('│ Algorithm                         │   Time (ms) │  Speed (mbps) │');
-    print('├───────────────────────────────────┼─────────────┼───────────────┤');
+    print(
+        '┌───────────────────────────────────┬─────────────┬───────────────┐');
+    print(
+        '│ Algorithm                         │   Time (ms) │  Speed (mbps) │');
+    print(
+        '├───────────────────────────────────┼─────────────┼───────────────┤');
     for (var r in rows) {
-      print('│ ${r.name.padRight(33)} │   ${r.timeMs.toString().padLeft(9)} │   ${r.mbps.toString().padLeft(11)} │');
+      print(
+          '│ ${r.name.padRight(33)} │   ${r.timeMs.toString().padLeft(9)} │   ${r.mbps.toString().padLeft(11)} │');
     }
-    print('└───────────────────────────────────┴─────────────┴───────────────┘');
+    print(
+        '└───────────────────────────────────┴─────────────┴───────────────┘');
     print('');
   }
 
@@ -192,15 +217,18 @@ Future<void> main(List<String> arguments) async {
 
   if (hashResults.isNotEmpty) {
     final best = hashResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
-    print('${chalk.green('🏆 Best Hash Performance:')} ${best.name} (${best.mbps} mbps)');
+    print(
+        '${chalk.green('🏆 Best Hash Performance:')} ${best.name} (${best.mbps} mbps)');
   }
   if (encResults.isNotEmpty) {
     final best = encResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
-    print('${chalk.green('🏆 Best Encryption Performance:')} ${best.name} (${best.mbps} mbps)');
+    print(
+        '${chalk.green('🏆 Best Encryption Performance:')} ${best.name} (${best.mbps} mbps)');
   }
   if (rngResults.isNotEmpty) {
     final best = rngResults.reduce((a, b) => a.mbps > b.mbps ? a : b);
-    print('${chalk.green('🏆 Best RNG Performance:')} ${best.name} (${best.mbps} mbps)');
+    print(
+        '${chalk.green('🏆 Best RNG Performance:')} ${best.name} (${best.mbps} mbps)');
   }
 
   // CPU / platform footer
@@ -226,6 +254,7 @@ void line() {
 Future<void> _warmupAsync(int n, Future<void> Function() fn) async {
   for (var i = 0; i < n; i++) await fn();
 }
+
 void _warmup(int n, void Function() fn) {
   for (var i = 0; i < n; i++) fn();
 }
@@ -271,7 +300,9 @@ Future<List<TestResult>> hashTest(
   var betterSha = better.Sha256();
   _warmup(warmups, () => betterSha.hash(inputBytes));
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
     betterSha.hash(inputBytes);
     stdout.write('.');
@@ -291,7 +322,9 @@ Future<List<TestResult>> hashTest(
     print("Start OpenSSL SHA256");
     _warmup(warmups, () => openssl.sha256(inputBytes));
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
       openssl.sha256(inputBytes);
       stdout.write('.');
@@ -312,7 +345,9 @@ Future<List<TestResult>> hashTest(
     print("Start BoringSSL SHA256");
     _warmup(warmups, () => boring.sha256(inputBytes));
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
       boring.sha256(inputBytes);
       stdout.write('.');
@@ -350,7 +385,7 @@ Future<List<TestResult>> aesctrTest(
   line();
   print("Start software AES-CTR");
   final encKey = Key.fromUtf8('my 32 length key................');
-  final encIv  = IV.fromLength(16);
+  final encIv = IV.fromLength(16);
   final encrypter = Encrypter(AES(encKey, mode: AESMode.ctr));
   // encryptBytes/decryptBytes avoid internal String↔bytes conversion.
   _warmup(warmups, () {
@@ -363,7 +398,8 @@ Future<List<TestResult>> aesctrTest(
     final enc = encrypter.encryptBytes(inputBytes, iv: encIv);
     final dec = encrypter.decryptBytes(enc, iv: encIv);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
@@ -375,21 +411,27 @@ Future<List<TestResult>> aesctrTest(
   // --- Better AES-CTR ---
   line();
   print("Start Better AES-CTR");
-  better.AesCtr bAlgorithm = better.AesCtr.with256bits(macAlgorithm: better.Hmac.sha256());
+  better.AesCtr bAlgorithm =
+      better.AesCtr.with256bits(macAlgorithm: better.Hmac.sha256());
   var bSecretKey = await bAlgorithm.newSecretKey();
   final bctr = Uint8List(16);
   _fillRandom(bctr);
   await _warmupAsync(warmups, () async {
-    final box = await bAlgorithm.encrypt(inputBytes, secretKey: bSecretKey, nonce: bctr);
+    final box = await bAlgorithm.encrypt(inputBytes,
+        secretKey: bSecretKey, nonce: bctr);
     await bAlgorithm.decrypt(box, secretKey: bSecretKey);
   });
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
-    final box = await bAlgorithm.encrypt(inputBytes, secretKey: bSecretKey, nonce: bctr);
+    final box = await bAlgorithm.encrypt(inputBytes,
+        secretKey: bSecretKey, nonce: bctr);
     final dec = await bAlgorithm.decrypt(box, secretKey: bSecretKey);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
@@ -405,7 +447,7 @@ Future<List<TestResult>> aesctrTest(
     line();
     print("Start OpenSSL AES-256-CTR");
     final sslKey = Uint8List(32);
-    final sslIv  = Uint8List(16);
+    final sslIv = Uint8List(16);
     _fillRandom(sslKey);
     _fillRandom(sslIv);
     _warmup(warmups, () {
@@ -413,12 +455,15 @@ Future<List<TestResult>> aesctrTest(
       openssl.aes256CtrDecrypt(enc, sslKey, sslIv);
     });
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
       final enc = openssl.aes256CtrEncrypt(inputBytes, sslKey, sslIv);
       final dec = openssl.aes256CtrDecrypt(enc, sslKey, sslIv);
       stdout.write(const ListEquality().equals(dec, inputBytes)
-          ? chalk.green(".") : chalk.red("."));
+          ? chalk.green(".")
+          : chalk.red("."));
       count++;
     }
     sw.stop();
@@ -435,7 +480,7 @@ Future<List<TestResult>> aesctrTest(
     line();
     print("Start BoringSSL AES-256-CTR");
     final bKey = Uint8List(32);
-    final bIv  = Uint8List(16);
+    final bIv = Uint8List(16);
     _fillRandom(bKey);
     _fillRandom(bIv);
     _warmup(warmups, () {
@@ -443,12 +488,15 @@ Future<List<TestResult>> aesctrTest(
       boring.aes256CtrDecrypt(enc, bKey, bIv);
     });
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
       final enc = boring.aes256CtrEncrypt(inputBytes, bKey, bIv);
       final dec = boring.aes256CtrDecrypt(enc, bKey, bIv);
       stdout.write(const ListEquality().equals(dec, inputBytes)
-          ? chalk.green(".") : chalk.red("."));
+          ? chalk.green(".")
+          : chalk.red("."));
       count++;
     }
     sw.stop();
@@ -482,7 +530,7 @@ Future<List<TestResult>> chacha20Test(
   // --- PointyCastle ChaCha20 ---
   line();
   print("Start PointyCastle ChaCha20");
-  final pcKey   = Uint8List(32);
+  final pcKey = Uint8List(32);
   final pcNonce = Uint8List(8);
   _fillRandom(pcKey);
   _fillRandom(pcNonce);
@@ -491,7 +539,7 @@ Future<List<TestResult>> chacha20Test(
   final pcDecrypted = Uint8List(inputBytes.length);
   final pcCipher = ChaCha20Engine();
   _warmup(warmups, () {
-    pcCipher.init(true,  ParametersWithIV(KeyParameter(pcKey), pcNonce));
+    pcCipher.init(true, ParametersWithIV(KeyParameter(pcKey), pcNonce));
     pcCipher.processBytes(inputBytes, 0, inputBytes.length, pcEncrypted, 0);
     pcCipher.init(false, ParametersWithIV(KeyParameter(pcKey), pcNonce));
     pcCipher.processBytes(pcEncrypted, 0, pcEncrypted.length, pcDecrypted, 0);
@@ -499,12 +547,13 @@ Future<List<TestResult>> chacha20Test(
   int count = 0;
   final sw = Stopwatch()..start();
   while (count < repeat) {
-    pcCipher.init(true,  ParametersWithIV(KeyParameter(pcKey), pcNonce));
+    pcCipher.init(true, ParametersWithIV(KeyParameter(pcKey), pcNonce));
     pcCipher.processBytes(inputBytes, 0, inputBytes.length, pcEncrypted, 0);
     pcCipher.init(false, ParametersWithIV(KeyParameter(pcKey), pcNonce));
     pcCipher.processBytes(pcEncrypted, 0, pcEncrypted.length, pcDecrypted, 0);
     stdout.write(const ListEquality().equals(pcDecrypted, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
@@ -521,16 +570,21 @@ Future<List<TestResult>> chacha20Test(
   final bNonce = Uint8List(12);
   _fillRandom(bNonce);
   await _warmupAsync(warmups, () async {
-    final box = await bChacha.encrypt(inputBytes, secretKey: bSecretKey, nonce: bNonce);
+    final box =
+        await bChacha.encrypt(inputBytes, secretKey: bSecretKey, nonce: bNonce);
     await bChacha.decrypt(box, secretKey: bSecretKey);
   });
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
-    final box = await bChacha.encrypt(inputBytes, secretKey: bSecretKey, nonce: bNonce);
+    final box =
+        await bChacha.encrypt(inputBytes, secretKey: bSecretKey, nonce: bNonce);
     final dec = await bChacha.decrypt(box, secretKey: bSecretKey);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
@@ -548,7 +602,7 @@ Future<List<TestResult>> chacha20Test(
     line();
     print("Start OpenSSL ChaCha20");
     final sslKey = Uint8List(32);
-    final sslIv  = Uint8List(16); // EVP_chacha20: 4-byte counter + 12-byte nonce
+    final sslIv = Uint8List(16); // EVP_chacha20: 4-byte counter + 12-byte nonce
     _fillRandom(sslKey);
     _fillRandom(sslIv);
     _warmup(warmups, () {
@@ -556,12 +610,15 @@ Future<List<TestResult>> chacha20Test(
       openssl.chacha20Decrypt(enc, sslKey, sslIv);
     });
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
       final enc = openssl.chacha20Encrypt(inputBytes, sslKey, sslIv);
       final dec = openssl.chacha20Decrypt(enc, sslKey, sslIv);
       stdout.write(const ListEquality().equals(dec, inputBytes)
-          ? chalk.green(".") : chalk.red("."));
+          ? chalk.green(".")
+          : chalk.red("."));
       count++;
     }
     sw.stop();
@@ -580,7 +637,7 @@ Future<List<TestResult>> chacha20Test(
     line();
     print("Start BoringSSL ChaCha20");
     final bKey = Uint8List(32);
-    final bIv  = Uint8List(16);
+    final bIv = Uint8List(16);
     _fillRandom(bKey);
     _fillRandom(bIv);
     _warmup(warmups, () {
@@ -588,12 +645,15 @@ Future<List<TestResult>> chacha20Test(
       boring.chacha20Decrypt(enc, bKey, bIv);
     });
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
       final enc = boring.chacha20Encrypt(inputBytes, bKey, bIv);
       final dec = boring.chacha20Decrypt(enc, bKey, bIv);
       stdout.write(const ListEquality().equals(dec, inputBytes)
-          ? chalk.green(".") : chalk.red("."));
+          ? chalk.green(".")
+          : chalk.red("."));
       count++;
     }
     sw.stop();
@@ -614,35 +674,6 @@ Future<List<TestResult>> chacha20Test(
 // libsodium tests
 // ---------------------------------------------------------------------------
 
-String getLibsodiumPath() {
-  if (Platform.isMacOS) {
-    for (var p in [
-      '/opt/homebrew/opt/libsodium/lib/libsodium.dylib',
-      '/usr/local/opt/libsodium/lib/libsodium.dylib',
-    ]) {
-      if (File(p).existsSync()) return p;
-    }
-    return 'libsodium.dylib';
-  } else if (Platform.isLinux) {
-    for (var p in [
-      '/usr/lib/x86_64-linux-gnu/libsodium.so.23',
-      '/usr/lib/x86_64-linux-gnu/libsodium.so',
-      '/usr/lib/aarch64-linux-gnu/libsodium.so.23',
-      '/usr/lib/aarch64-linux-gnu/libsodium.so',
-      '/usr/lib/libsodium.so.23',
-      '/usr/lib/libsodium.so',
-      '/usr/local/lib/libsodium.so.23',
-      '/usr/local/lib/libsodium.so',
-    ]) {
-      if (File(p).existsSync()) return p;
-    }
-    return 'libsodium.so';
-  } else if (Platform.isWindows) {
-    return 'libsodium.dll';
-  }
-  return 'libsodium';
-}
-
 Future<List<TestResult>> sodiumTest(
   String text,
   Uint8List inputBytes,
@@ -654,16 +685,18 @@ Future<List<TestResult>> sodiumTest(
   print("String length: ${(inputBytes.length / 1024).toStringAsFixed(0)} KB");
 
   try {
-    final libsodiumPath = getLibsodiumPath();
-    print("Loading libsodium from: $libsodiumPath");
-    final sodium = await SodiumInit.init2(() => DynamicLibrary.open(libsodiumPath));
+    // sodium 4.x builds libsodium via build hooks; no manual path needed.
+    final sodium = await SodiumInit.init();
 
     // Correctness smoke-test before any timing.
-    final testMsg   = utf8.encode("test");
-    final testNonce = sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
-    final testKey   = sodium.crypto.secretBox.keygen();
-    final testEnc   = sodium.crypto.secretBox.easy(message: testMsg, nonce: testNonce, key: testKey);
-    final testDec   = sodium.crypto.secretBox.openEasy(cipherText: testEnc, nonce: testNonce, key: testKey);
+    final testMsg = utf8.encode("test");
+    final testNonce =
+        sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
+    final testKey = sodium.crypto.secretBox.keygen();
+    final testEnc = sodium.crypto.secretBox
+        .easy(message: testMsg, nonce: testNonce, key: testKey);
+    final testDec = sodium.crypto.secretBox
+        .openEasy(cipherText: testEnc, nonce: testNonce, key: testKey);
     if (!const ListEquality().equals(testMsg, testDec)) {
       print(chalk.red('Sodium basic test failed'));
       testKey.dispose();
@@ -677,61 +710,74 @@ Future<List<TestResult>> sodiumTest(
     var key = sodium.crypto.secretBox.keygen();
     // Warmup
     for (var i = 0; i < warmups; i++) {
-      final n   = sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
-      final enc = sodium.crypto.secretBox.easy(message: inputBytes, nonce: n, key: key);
+      final n = sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
+      final enc =
+          sodium.crypto.secretBox.easy(message: inputBytes, nonce: n, key: key);
       sodium.crypto.secretBox.openEasy(cipherText: enc, nonce: n, key: key);
     }
     int count = 0;
     final sw = Stopwatch()..start();
     while (count < repeat) {
-      final n   = sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
-      final enc = sodium.crypto.secretBox.easy(message: inputBytes, nonce: n, key: key);
-      final dec = sodium.crypto.secretBox.openEasy(cipherText: enc, nonce: n, key: key);
+      final n = sodium.randombytes.buf(sodium.crypto.secretBox.nonceBytes);
+      final enc =
+          sodium.crypto.secretBox.easy(message: inputBytes, nonce: n, key: key);
+      final dec =
+          sodium.crypto.secretBox.openEasy(cipherText: enc, nonce: n, key: key);
       stdout.write(const ListEquality().equals(dec, inputBytes)
-          ? chalk.green(".") : chalk.red("."));
+          ? chalk.green(".")
+          : chalk.red("."));
       count++;
     }
     key.dispose();
     sw.stop();
-    var ms   = sw.elapsedMilliseconds;
+    var ms = sw.elapsedMilliseconds;
     var mbps = _mbps(inputBytes.length, repeat, ms);
     print("\n$ms ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('Sodium XSalsa20-Poly1305', mbps, ms));
 
-    // --- ChaCha20-Poly1305 AEAD ---
+    // --- XChaCha20-Poly1305 IETF AEAD ---
     line();
-    print("Start Sodium ChaCha20-Poly1305 AEAD");
-    var aeadKey = sodium.crypto.aead.keygen();
+    print("Start Sodium XChaCha20-Poly1305 IETF AEAD");
+    var aeadKey = sodium.crypto.aeadXChaCha20Poly1305IETF.keygen();
     // Warmup
     for (var i = 0; i < warmups; i++) {
-      final n   = sodium.randombytes.buf(sodium.crypto.aead.nonceBytes);
-      final enc = sodium.crypto.aead.encrypt(message: inputBytes, nonce: n, key: aeadKey);
-      sodium.crypto.aead.decrypt(cipherText: enc, nonce: n, key: aeadKey);
+      final n = sodium.randombytes
+          .buf(sodium.crypto.aeadXChaCha20Poly1305IETF.nonceBytes);
+      final enc = sodium.crypto.aeadXChaCha20Poly1305IETF
+          .encrypt(message: inputBytes, nonce: n, key: aeadKey);
+      sodium.crypto.aeadXChaCha20Poly1305IETF
+          .decrypt(cipherText: enc, nonce: n, key: aeadKey);
     }
     count = 0;
-    sw..reset()..start();
+    sw
+      ..reset()
+      ..start();
     while (count < repeat) {
-      final n   = sodium.randombytes.buf(sodium.crypto.aead.nonceBytes);
-      final enc = sodium.crypto.aead.encrypt(message: inputBytes, nonce: n, key: aeadKey);
-      final dec = sodium.crypto.aead.decrypt(cipherText: enc, nonce: n, key: aeadKey);
+      final n = sodium.randombytes
+          .buf(sodium.crypto.aeadXChaCha20Poly1305IETF.nonceBytes);
+      final enc = sodium.crypto.aeadXChaCha20Poly1305IETF
+          .encrypt(message: inputBytes, nonce: n, key: aeadKey);
+      final dec = sodium.crypto.aeadXChaCha20Poly1305IETF
+          .decrypt(cipherText: enc, nonce: n, key: aeadKey);
       stdout.write(const ListEquality().equals(dec, inputBytes)
-          ? chalk.green(".") : chalk.red("."));
+          ? chalk.green(".")
+          : chalk.red("."));
       count++;
     }
     aeadKey.dispose();
     sw.stop();
-    ms   = sw.elapsedMilliseconds;
+    ms = sw.elapsedMilliseconds;
     mbps = _mbps(inputBytes.length, repeat, ms);
     print("\n$ms ms  ${chalk.green('$mbps')} mbps");
-    results.add(TestResult('Sodium ChaCha20-Poly1305 AEAD', mbps, ms));
-
+    results.add(TestResult('Sodium XChaCha20-Poly1305 IETF AEAD', mbps, ms));
   } catch (e) {
     print(chalk.red('Sodium error: $e'));
     if (e.toString().contains('cannot open shared object') ||
         e.toString().contains('Failed to load dynamic library')) {
       print(chalk.yellow('libsodium not found – install it:'));
       if (Platform.isLinux) {
-        print(chalk.yellow('  Ubuntu/Debian: sudo apt-get install libsodium23'));
+        print(
+            chalk.yellow('  Ubuntu/Debian: sudo apt-get install libsodium23'));
       } else if (Platform.isMacOS) {
         print(chalk.yellow('  macOS: brew install libsodium'));
       }
@@ -768,7 +814,11 @@ List<TestResult> fastcryptTest(String text, int repeat) {
     final warmups = min(2, repeat);
     for (var i = 0; i < warmups; i++) {
       final enc = fc.encryptString(text);
-      fc.decryptString(ciphertext: enc.ciphertext, tag: enc.tag, key: enc.key, nonce: enc.nonce);
+      fc.decryptString(
+          ciphertext: enc.ciphertext,
+          tag: enc.tag,
+          key: enc.key,
+          nonce: enc.nonce);
     }
 
     line();
@@ -777,12 +827,16 @@ List<TestResult> fastcryptTest(String text, int repeat) {
     final sw = Stopwatch()..start();
     while (count < repeat) {
       final enc = fc.encryptString(text);
-      final dec = fc.decryptString(ciphertext: enc.ciphertext, tag: enc.tag, key: enc.key, nonce: enc.nonce);
+      final dec = fc.decryptString(
+          ciphertext: enc.ciphertext,
+          tag: enc.tag,
+          key: enc.key,
+          nonce: enc.nonce);
       stdout.write(dec == text ? chalk.green(".") : chalk.red("."));
       count++;
     }
     sw.stop();
-    var ms   = sw.elapsedMilliseconds;
+    var ms = sw.elapsedMilliseconds;
     var mbps = _mbps(text.length, repeat, ms);
     print("\n$ms ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('FastCrypt ChaCha20-Poly1305', mbps, ms));
@@ -805,12 +859,12 @@ List<TestResult> opensslPkgTest(
   final warmups = min(2, repeat);
 
   final aesKey = Uint8List(32);
-  final aesIv  = Uint8List(16);
+  final aesIv = Uint8List(16);
   _fillRandom(aesKey);
   _fillRandom(aesIv);
 
   final chaKey = Uint8List(32);
-  final chaIv  = Uint8List(16);
+  final chaIv = Uint8List(16);
   _fillRandom(chaKey);
   _fillRandom(chaIv);
 
@@ -826,7 +880,7 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  var ms   = sw.elapsedMilliseconds;
+  var ms = sw.elapsedMilliseconds;
   var mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg SHA256 naive', mbps, ms));
@@ -836,14 +890,16 @@ List<TestResult> opensslPkgTest(
   print("Start OpenSSL pkg SHA256 (optimised)");
   _warmup(warmups, () => pkgCrypto.sha256(inputBytes));
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
     pkgCrypto.sha256(inputBytes);
     stdout.write('.');
     count++;
   }
   sw.stop();
-  ms   = sw.elapsedMilliseconds;
+  ms = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg SHA256 opt', mbps, ms));
@@ -856,16 +912,19 @@ List<TestResult> opensslPkgTest(
     opensslPkgAes256CtrDecrypt(enc, aesKey, aesIv);
   });
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
     final enc = opensslPkgAes256CtrEncrypt(inputBytes, aesKey, aesIv);
     final dec = opensslPkgAes256CtrDecrypt(enc, aesKey, aesIv);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
-  ms   = sw.elapsedMilliseconds;
+  ms = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg AES-CTR naive', mbps, ms));
@@ -878,16 +937,19 @@ List<TestResult> opensslPkgTest(
     pkgCrypto.aes256CtrDecrypt(enc, aesKey, aesIv);
   });
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
     final enc = pkgCrypto.aes256CtrEncrypt(inputBytes, aesKey, aesIv);
     final dec = pkgCrypto.aes256CtrDecrypt(enc, aesKey, aesIv);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
-  ms   = sw.elapsedMilliseconds;
+  ms = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg AES-CTR opt', mbps, ms));
@@ -900,16 +962,19 @@ List<TestResult> opensslPkgTest(
     opensslPkgChacha20Decrypt(enc, chaKey, chaIv);
   });
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
     final enc = opensslPkgChacha20Encrypt(inputBytes, chaKey, chaIv);
     final dec = opensslPkgChacha20Decrypt(enc, chaKey, chaIv);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
-  ms   = sw.elapsedMilliseconds;
+  ms = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg ChaCha20 naive', mbps, ms));
@@ -922,16 +987,19 @@ List<TestResult> opensslPkgTest(
     pkgCrypto.chacha20Decrypt(enc, chaKey, chaIv);
   });
   count = 0;
-  sw..reset()..start();
+  sw
+    ..reset()
+    ..start();
   while (count < repeat) {
     final enc = pkgCrypto.chacha20Encrypt(inputBytes, chaKey, chaIv);
     final dec = pkgCrypto.chacha20Decrypt(enc, chaKey, chaIv);
     stdout.write(const ListEquality().equals(dec, inputBytes)
-        ? chalk.green(".") : chalk.red("."));
+        ? chalk.green(".")
+        : chalk.red("."));
     count++;
   }
   sw.stop();
-  ms   = sw.elapsedMilliseconds;
+  ms = sw.elapsedMilliseconds;
   mbps = _mbps(inputBytes.length, repeat, ms);
   print("\n$ms ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg ChaCha20 opt', mbps, ms));
@@ -969,7 +1037,7 @@ List<TestResult> randBytesTest(
       count++;
     }
     sw.stop();
-    final ms   = sw.elapsedMilliseconds;
+    final ms = sw.elapsedMilliseconds;
     final mbps = _mbps(n, repeat, ms);
     print("\n$ms ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('FFI libcrypto RAND_bytes', mbps, ms));
@@ -987,7 +1055,7 @@ List<TestResult> randBytesTest(
       count++;
     }
     sw.stop();
-    final ms   = sw.elapsedMilliseconds;
+    final ms = sw.elapsedMilliseconds;
     final mbps = _mbps(n, repeat, ms);
     print("\n$ms ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('BoringSSL RAND_bytes', mbps, ms));

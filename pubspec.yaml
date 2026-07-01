@@ -18,7 +18,7 @@ dependencies:
   pointycastle: ^3.9.1
   fastcrypt: ^1.0.0
   collection: ^1.18.0
-  sodium: ^2.3.1
+  sodium: ^4.0.0
   openssl: ^1.0.1
   boringssl:
     path: packages/boringssl
