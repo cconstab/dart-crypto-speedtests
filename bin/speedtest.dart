@@ -97,7 +97,7 @@ void printCpuFeatures() {
 class TestResult {
   final String name;
   final int mbps;
-  final int timeMs;
+  final double timeMs;
 
   TestResult(this.name, this.mbps, this.timeMs);
 }
@@ -204,7 +204,7 @@ Future<void> main(List<String> arguments) async {
         '├───────────────────────────────────┼─────────────┼───────────────┤');
     for (var r in rows) {
       print(
-          '│ ${r.name.padRight(33)} │   ${r.timeMs.toString().padLeft(9)} │   ${r.mbps.toString().padLeft(11)} │');
+          '│ ${r.name.padRight(33)} │   ${_fmtMs(r.timeMs).padLeft(9)} │   ${r.mbps.toString().padLeft(11)} │');
     }
     print(
         '└───────────────────────────────────┴─────────────┴───────────────┘');
@@ -259,8 +259,10 @@ void _warmup(int n, void Function() fn) {
   for (var i = 0; i < n; i++) fn();
 }
 
-int _mbps(int dataBytes, int repeat, int ms) =>
+int _mbps(int dataBytes, int repeat, double ms) =>
     ms == 0 ? 0 : (((dataBytes * 8 * repeat) / 1000000) / (ms / 1000)).round();
+
+String _fmtMs(double ms) => ms.toStringAsFixed(3);
 
 // ---------------------------------------------------------------------------
 // Hash tests
@@ -289,9 +291,9 @@ Future<List<TestResult>> hashTest(
     count++;
   }
   sw.stop();
-  var softwareMs = sw.elapsedMilliseconds;
+  var softwareMs = sw.elapsedMicroseconds / 1000;
   var mbps = _mbps(inputBytes.length, repeat, softwareMs);
-  print("\n$softwareMs ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(softwareMs)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('Crypto SHA256', mbps, softwareMs));
 
   // --- Better SHA-256 ---
@@ -309,9 +311,9 @@ Future<List<TestResult>> hashTest(
     count++;
   }
   sw.stop();
-  var betterMs = sw.elapsedMilliseconds;
+  var betterMs = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, betterMs);
-  print("\n$betterMs ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(betterMs)} ms  ${chalk.green('$mbps')} mbps");
   var pct = betterMs == 0 ? 0 : ((softwareMs / betterMs) * 100).round() - 100;
   print("Better vs Crypto: ${chalk.green("$pct")}%");
   results.add(TestResult('Better SHA256', mbps, betterMs));
@@ -331,9 +333,9 @@ Future<List<TestResult>> hashTest(
       count++;
     }
     sw.stop();
-    var opensslMs = sw.elapsedMilliseconds;
+    var opensslMs = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, opensslMs);
-    print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(opensslMs)} ms  ${chalk.green('$mbps')} mbps");
     pct = opensslMs == 0 ? 0 : ((softwareMs / opensslMs) * 100).round() - 100;
     print("OpenSSL vs Crypto: ${chalk.green("$pct")}%");
     results.add(TestResult('FFI libcrypto SHA256', mbps, opensslMs));
@@ -354,9 +356,9 @@ Future<List<TestResult>> hashTest(
       count++;
     }
     sw.stop();
-    var boringMs = sw.elapsedMilliseconds;
+    var boringMs = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, boringMs);
-    print("\n$boringMs ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(boringMs)} ms  ${chalk.green('$mbps')} mbps");
     pct = boringMs == 0 ? 0 : ((softwareMs / boringMs) * 100).round() - 100;
     print("BoringSSL vs Crypto: ${chalk.green("$pct")}%");
     results.add(TestResult('BoringSSL SHA256', mbps, boringMs));
@@ -403,9 +405,9 @@ Future<List<TestResult>> aesctrTest(
     count++;
   }
   sw.stop();
-  var softwareMs = sw.elapsedMilliseconds;
+  var softwareMs = sw.elapsedMicroseconds / 1000;
   var mbps = _mbps(inputBytes.length, repeat, softwareMs);
-  print("\n$softwareMs ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(softwareMs)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('Software AES-CTR', mbps, softwareMs));
 
   // --- Better AES-CTR ---
@@ -435,9 +437,9 @@ Future<List<TestResult>> aesctrTest(
     count++;
   }
   sw.stop();
-  var betterMs = sw.elapsedMilliseconds;
+  var betterMs = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, betterMs);
-  print("\n$betterMs ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(betterMs)} ms  ${chalk.green('$mbps')} mbps");
   var pct = betterMs == 0 ? 0 : ((softwareMs / betterMs) * 100).round() - 100;
   print("Better vs Software: ${chalk.green("$pct")}%");
   results.add(TestResult('Better AES-CTR', mbps, betterMs));
@@ -467,9 +469,9 @@ Future<List<TestResult>> aesctrTest(
       count++;
     }
     sw.stop();
-    var opensslMs = sw.elapsedMilliseconds;
+    var opensslMs = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, opensslMs);
-    print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(opensslMs)} ms  ${chalk.green('$mbps')} mbps");
     pct = opensslMs == 0 ? 0 : ((softwareMs / opensslMs) * 100).round() - 100;
     print("OpenSSL vs Software: ${chalk.green("$pct")}%");
     results.add(TestResult('FFI libcrypto AES-256-CTR', mbps, opensslMs));
@@ -500,9 +502,9 @@ Future<List<TestResult>> aesctrTest(
       count++;
     }
     sw.stop();
-    var boringMs = sw.elapsedMilliseconds;
+    var boringMs = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, boringMs);
-    print("\n$boringMs ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(boringMs)} ms  ${chalk.green('$mbps')} mbps");
     pct = boringMs == 0 ? 0 : ((softwareMs / boringMs) * 100).round() - 100;
     print("BoringSSL vs Software: ${chalk.green("$pct")}%");
     results.add(TestResult('BoringSSL AES-256-CTR', mbps, boringMs));
@@ -557,9 +559,9 @@ Future<List<TestResult>> chacha20Test(
     count++;
   }
   sw.stop();
-  var pcMs = sw.elapsedMilliseconds;
+  var pcMs = sw.elapsedMicroseconds / 1000;
   var mbps = _mbps(inputBytes.length, repeat, pcMs);
-  print("\n$pcMs ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(pcMs)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('PointyCastle ChaCha20', mbps, pcMs));
 
   // --- Better ChaCha20 ---
@@ -588,9 +590,9 @@ Future<List<TestResult>> chacha20Test(
     count++;
   }
   sw.stop();
-  var betterMs = sw.elapsedMilliseconds;
+  var betterMs = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, betterMs);
-  print("\n$betterMs ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(betterMs)} ms  ${chalk.green('$mbps')} mbps");
   var pct = betterMs == 0 ? 0 : ((pcMs / betterMs) * 100).round() - 100;
   print(pct > 0
       ? "Better faster than PC: ${chalk.green("$pct")}%"
@@ -622,9 +624,9 @@ Future<List<TestResult>> chacha20Test(
       count++;
     }
     sw.stop();
-    var opensslMs = sw.elapsedMilliseconds;
+    var opensslMs = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, opensslMs);
-    print("\n$opensslMs ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(opensslMs)} ms  ${chalk.green('$mbps')} mbps");
     pct = opensslMs == 0 ? 0 : ((pcMs / opensslMs) * 100).round() - 100;
     print(pct > 0
         ? "OpenSSL faster than PC: ${chalk.green("$pct")}%"
@@ -657,9 +659,9 @@ Future<List<TestResult>> chacha20Test(
       count++;
     }
     sw.stop();
-    var boringMs = sw.elapsedMilliseconds;
+    var boringMs = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, boringMs);
-    print("\n$boringMs ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(boringMs)} ms  ${chalk.green('$mbps')} mbps");
     pct = boringMs == 0 ? 0 : ((pcMs / boringMs) * 100).round() - 100;
     print(pct > 0
         ? "BoringSSL faster than PC: ${chalk.green("$pct")}%"
@@ -730,9 +732,9 @@ Future<List<TestResult>> sodiumTest(
     }
     key.dispose();
     sw.stop();
-    var ms = sw.elapsedMilliseconds;
+    var ms = sw.elapsedMicroseconds / 1000;
     var mbps = _mbps(inputBytes.length, repeat, ms);
-    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('Sodium XSalsa20-Poly1305', mbps, ms));
 
     // --- XChaCha20-Poly1305 IETF AEAD ---
@@ -766,9 +768,9 @@ Future<List<TestResult>> sodiumTest(
     }
     aeadKey.dispose();
     sw.stop();
-    ms = sw.elapsedMilliseconds;
+    ms = sw.elapsedMicroseconds / 1000;
     mbps = _mbps(inputBytes.length, repeat, ms);
-    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('Sodium XChaCha20-Poly1305 IETF AEAD', mbps, ms));
   } catch (e) {
     print(chalk.red('Sodium error: $e'));
@@ -836,9 +838,9 @@ List<TestResult> fastcryptTest(String text, int repeat) {
       count++;
     }
     sw.stop();
-    var ms = sw.elapsedMilliseconds;
+    var ms = sw.elapsedMicroseconds / 1000;
     var mbps = _mbps(text.length, repeat, ms);
-    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('FastCrypt ChaCha20-Poly1305', mbps, ms));
   } catch (e) {
     print(chalk.red('FastCrypt error: $e'));
@@ -880,9 +882,9 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  var ms = sw.elapsedMilliseconds;
+  var ms = sw.elapsedMicroseconds / 1000;
   var mbps = _mbps(inputBytes.length, repeat, ms);
-  print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg SHA256 naive', mbps, ms));
 
   // --- SHA-256 optimised ---
@@ -899,9 +901,9 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  ms = sw.elapsedMilliseconds;
+  ms = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, ms);
-  print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg SHA256 opt', mbps, ms));
 
   // --- AES-256-CTR naive ---
@@ -924,9 +926,9 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  ms = sw.elapsedMilliseconds;
+  ms = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, ms);
-  print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg AES-CTR naive', mbps, ms));
 
   // --- AES-256-CTR optimised ---
@@ -949,9 +951,9 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  ms = sw.elapsedMilliseconds;
+  ms = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, ms);
-  print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg AES-CTR opt', mbps, ms));
 
   // --- ChaCha20 naive ---
@@ -974,9 +976,9 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  ms = sw.elapsedMilliseconds;
+  ms = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, ms);
-  print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg ChaCha20 naive', mbps, ms));
 
   // --- ChaCha20 optimised ---
@@ -999,17 +1001,26 @@ List<TestResult> opensslPkgTest(
     count++;
   }
   sw.stop();
-  ms = sw.elapsedMilliseconds;
+  ms = sw.elapsedMicroseconds / 1000;
   mbps = _mbps(inputBytes.length, repeat, ms);
-  print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+  print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
   results.add(TestResult('OpenSSL pkg ChaCha20 opt', mbps, ms));
 
   return results;
 }
 
 // ---------------------------------------------------------------------------
-// RAND_bytes test — OpenSSL FFI hardware RNG
+// RAND_bytes test — Dart software CSPRNG vs OpenSSL/BoringSSL FFI RNG
 // ---------------------------------------------------------------------------
+
+// Fills [n] bytes from Dart's Random.secure(), 4 bytes per call for speed.
+Uint8List _dartSecureRandBytes(Random rng, int n) {
+  final buf = Uint8List(n);
+  final words = buf.buffer.asUint32List(0, n ~/ 4);
+  for (var i = 0; i < words.length; i++) words[i] = rng.nextInt(1 << 32);
+  for (var i = words.length * 4; i < n; i++) buf[i] = rng.nextInt(256);
+  return buf;
+}
 
 List<TestResult> randBytesTest(
   Uint8List inputBytes,
@@ -1018,12 +1029,30 @@ List<TestResult> randBytesTest(
   BoringSslCrypto? boring,
 }) {
   List<TestResult> results = [];
-  if (openssl == null && boring == null) return results;
 
   final warmups = min(2, repeat);
   final n = inputBytes.length;
   line();
   print("String length: ${(n / 1024).toStringAsFixed(0)} KB");
+
+  {
+    line();
+    print("Start Dart Random.secure (software)");
+    final rng = Random.secure();
+    _warmup(warmups, () => _dartSecureRandBytes(rng, n));
+    int count = 0;
+    final sw = Stopwatch()..start();
+    while (count < repeat) {
+      _dartSecureRandBytes(rng, n);
+      stdout.write('.');
+      count++;
+    }
+    sw.stop();
+    final ms = sw.elapsedMicroseconds / 1000;
+    final mbps = _mbps(n, repeat, ms);
+    print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
+    results.add(TestResult('Dart Random.secure RAND (sw)', mbps, ms));
+  }
 
   if (openssl != null) {
     line();
@@ -1037,9 +1066,9 @@ List<TestResult> randBytesTest(
       count++;
     }
     sw.stop();
-    final ms = sw.elapsedMilliseconds;
+    final ms = sw.elapsedMicroseconds / 1000;
     final mbps = _mbps(n, repeat, ms);
-    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('FFI libcrypto RAND_bytes', mbps, ms));
   }
 
@@ -1055,9 +1084,9 @@ List<TestResult> randBytesTest(
       count++;
     }
     sw.stop();
-    final ms = sw.elapsedMilliseconds;
+    final ms = sw.elapsedMicroseconds / 1000;
     final mbps = _mbps(n, repeat, ms);
-    print("\n$ms ms  ${chalk.green('$mbps')} mbps");
+    print("\n${_fmtMs(ms)} ms  ${chalk.green('$mbps')} mbps");
     results.add(TestResult('BoringSSL RAND_bytes', mbps, ms));
   }
 
